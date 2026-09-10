@@ -27,11 +27,11 @@ def abrir_arquivo(arquivo):
     if formato(arquivo) == "mp3":
         try:
             audio = EasyID3(arquivo)
-
+            return audio
         except ID3NoHeaderError:
             audio = EasyID3()
             audio.save(arquivo)
-            return EasyID3(audio)
+            return audio
 
     return None
 
