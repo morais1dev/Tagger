@@ -3,16 +3,16 @@ from mutagen.easyid3 import EasyID3
 from mutagen.id3 import ID3NoHeaderError
 
 
-TAGS_EDITAVEIS = [
-    "title",
-    "artist",
-    "album",
-    "albumartist",
-    "tracknumber",
-    "genre",
-    "date"
-]
-
+TAGS_EDITAVEIS = {
+    1:"title",
+    2:"artist",
+    3:"album",
+    4:"albumartist",
+    5:"tracknumber",
+    6:"genre",
+    7:"date"
+}
+    
 
 def formato(arquivo):
     extensao = Path(arquivo).suffix.lower()
@@ -24,40 +24,26 @@ def formato(arquivo):
 
 
 def abrir_arquivo(arquivo):
-    if formato(arquivo) == "mp3":
-        try:
-            audio = EasyID3(arquivo)
-            return audio
-        except ID3NoHeaderError:
-            audio = EasyID3()
-            audio.save(arquivo)
-            return audio
-
-    return None
-
-
-def ler_tags(arquivo):
-    audio = abrir_arquivo(arquivo)
-
-    if audio is None:
+    if formato(arquivo) != "mp3":
         return None
+    try:
+        audio = EasyID3(arquivo)
+    except ID3NoHeaderError:
+        audio = EasyID3()
+        audio.save(arquivo)
 
+    return audio
+    
+
+def ler_tags(audio):
     return {
-        tag: audio.get(tag, [""])[0]
-        for tag in TAGS_EDITAVEIS
+        numero:audio.get(tag, [""][0])
+        for numero, tag in TAGS_EDITAVEIS.items()
     }
 
 
-def editar_tags(arquivo, tags):
-    audio = abrir_arquivo(arquivo)
-
-    if audio is None:
-        return False
-
-    for tag, valor in tags.items():
-        if valor != "":
-            audio[tag] = valor
-
+def editar_tags(audio, tag, valor):
+    audio[tag]=valor
     audio.save()
 
     return True

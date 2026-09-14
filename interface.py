@@ -11,4 +11,5 @@ def selecionar_arquivo():
             ("Arquivos MP3", "*.mp3")
         ]
     )
+    root.destroy()
     return arquivos
