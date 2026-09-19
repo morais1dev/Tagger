@@ -15,19 +15,31 @@ def main():
         if audio is None:
             print("Formato não suportado.")
             continue
-        tags = ler_tags(audio)
-        for numero, valor in tags.items():
-            tag = TAGS_EDITAVEIS[numero]
-            print(f"{numero} - {tag}: {valor}")
-        escolha = int(input("\nQual tag deseja editar? "))
+        while True:
+            tags = ler_tags(audio)
+            print("\nTags disponiveis")
+            for numero, valor in tags.items():
+                tag = TAGS_EDITAVEIS[numero]
+                print(f"{numero} - {tag}: {valor}")
+            print("0 - Finalizar edicao deste arquivo")
 
-        tag = TAGS_EDITAVEIS[escolha]
+            escolha = input("\nQual tag deseja editar?")
 
-        novo_valor = input(f"Novo valor para {tag}: ")
+            if escolha == "0":
+                break
 
-        editar_tags(audio, tag, novo_valor)
+            try:
+                escolha = int(escolha)
+                tag = TAGS_EDITAVEIS[escolha]
+            except (ValueError, KeyError):
+                print("Opcao invalida")
+                continue
 
-        print("Tag editada com sucesso.")
+            novo_valor = input(f"Novo valor para {tag}: ")
+            editar_tags(audio, tag, novo_valor)
+            print("Tag editada com sucesso")
+
+        print("Edicao do arquivo completa")
 
 if __name__ == "__main__":
     main()
