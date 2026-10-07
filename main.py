@@ -1,5 +1,5 @@
 from pathlib import Path
-from metadata import ler_tags, abrir_arquivo, editar_tags, bulk_edit, TAGS_EDITAVEIS, TAGS_BULK
+from metadata import ler_tags, abrir_arquivo, editar_tags, bulk_edit, TAGS_EDITAVEIS, tags_bulk
 from interface import selecionar_arquivo
 
 def mostrar_tags(tags):
@@ -101,21 +101,51 @@ def mostrar_bulk_arquivos(arquivos):
         nome = Path(arquivo).name
         print(f"{numero} - {nome}")
 
-    
+def mostrar_bulk_tags():
+    print("\nTags disponiveis: ")
+    for num, tag in enumerate(tags_bulk(), start=1):
+        print(f"{num} - {tag}")
+    print("0 - Cancelar")
+
 def selecionar_bulk_tags():
-    pass
+    tags = tags_bulk()
+    while True:
+        escolha = input("\nQual tag deseja editar em todos os arquivos? ")
+        if escolha == "0":
+            return None
+        try:
+            numero = int(escolha)
+            if numero < 1:
+                raise IndexError
+            return tags[numero - 1]
+        except (ValueError, IndexError):
+            print("Opção inválida.")
 
 def modo_bulk():
     arquivos = selecionar_arquivo()
-    
+
     if not arquivos:
-        print("Nenhum arquivo selecionado")
+        print("Nenhum arquivo selecionado.")
         return
-    
-    while True:
-        mostrar_bulk_arquivos(arquivos) 
-        break
-    
+
+    mostrar_bulk_arquivos(arquivos)
+
+    mostrar_bulk_tags()
+    tag = selecionar_bulk_tags()
+
+    if tag is None:
+        print("Operação cancelada.")
+        return
+
+    print(tag)
+
+    #TODO
+    # 1. pede o valor   -> input
+    # 2. confirmar (S/N)
+    # 3. chama bulk_edit(arquivos, tag, valor)
+    print("\nBulk edit ainda não implementado.")
+
+
 def mostrar_menu():
     print("\n=== Tagger ===")
     print("1 - Edição individual")

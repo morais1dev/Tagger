@@ -72,5 +72,3 @@ def bulk_edit(arquivos, tag, valor):
         
     
     return True
-
-print(tags_bulk())
