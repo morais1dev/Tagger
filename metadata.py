@@ -56,6 +56,12 @@ def editar_tags(audio, tag, valor):
 
     return True
 
+def tags_bulk():
+    btags = []
+    for tags in TAGS_EDITAVEIS.values():
+        if tags in TAGS_BULK:
+            btags.append(tags)
+    return btags
 
 def bulk_edit(arquivos, tag, valor):
     for arquivo in arquivos:
@@ -66,3 +72,5 @@ def bulk_edit(arquivos, tag, valor):
         
     
     return True
+
+print(tags_bulk())
