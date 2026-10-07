@@ -136,15 +136,29 @@ def modo_bulk():
     if tag is None:
         print("Operação cancelada.")
         return
+    
+    print(f"Tag escolhida: {tag}")
 
-    print(tag)
+    valor = input(f"Insira o novo valor para a tag {tag}: ").strip()
 
-    #TODO
-    # 1. pede o valor   -> input
-    # 2. confirmar (S/N)
-    # 3. chama bulk_edit(arquivos, tag, valor)
-    print("\nBulk edit ainda não implementado.")
+    while not valor:
+        print("O valor não pode ficar em branco.")
+        valor = input(f"Insira o novo valor para a tag {tag}: ").strip()
 
+    while True:
+        confirmacao = input(f"Confirmar alteração da tag '{tag}' para '{valor}' em {len(arquivos)} arquivo(s)? (S/N): ").strip().upper()
+        
+        if confirmacao in ['S', 'N']:
+            break 
+            
+        print("Entrada inválida! Digite 'S' para confirmar ou 'N' para cancelar.")
+
+    if confirmacao == 'S':
+        print(f"\nAplicando alterações...")
+        bulk_edit(arquivos, tag, valor)
+    else:
+        print("\nOperação cancelada pelo usuário.")
+    
 
 def mostrar_menu():
     print("\n=== Tagger ===")
