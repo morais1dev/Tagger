@@ -95,9 +95,13 @@ def modo_individual():
         if editar_arquivo(arquivo):
             editados.add(arquivo)
 
-def mostrar_bulk_tags():
-    pass
+def mostrar_bulk_arquivos(arquivos):
+    print(f"\nQuantidade de arquivos selecionados: {len(arquivos)}")
+    for numero, arquivo in enumerate(arquivos, start=1):
+        nome = Path(arquivo).name
+        print(f"{numero} - {nome}")
 
+    
 def selecionar_bulk_tags():
     pass
 
@@ -108,25 +112,10 @@ def modo_bulk():
         print("Nenhum arquivo selecionado")
         return
     
-    editados = set()
-    
     while True:
-        mostrar_arquivos(arquivos, editados)
-
-        arquivo = escolher_arquivo(arquivos)
-        if arquivo is None:
-            break
+        mostrar_bulk_arquivos(arquivos) 
+        break
     
-    #TODO 
-    # 1. selecionar arquivos
-    # 2. escolher uma tag permitida pro bulk
-    # 3. pedir o novo valor
-    # 4. confirmar (S/N)
-    # 5. chamar bulk_edit(arquivos, tag, valor)
-    
-    print("\nBulk edit ainda não implementado.")
-
-
 def mostrar_menu():
     print("\n=== Tagger ===")
     print("1 - Edição individual")
