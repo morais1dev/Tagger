@@ -209,6 +209,10 @@ def mostrar_menu():
 
 
 def main():
+
+    if os.name == "nt":
+        subprocess.run('title Tagger v1.0', shell=True)
+
     while True:
         mostrar_menu()
         escolha = input("\nEscolha uma opção: ")
@@ -224,7 +228,7 @@ def main():
             input("\nPressione Enter para continuar...")
 
     print("\nPrograma finalizado.")
-
+    input("\nPressione Enter para fechar a aplicação...")
 
 if __name__ == "__main__":
     main()

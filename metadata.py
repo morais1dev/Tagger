@@ -73,6 +73,9 @@ def validar_valor(tag, valor):
         partes = valor.split('/')
         if len(partes) > 2 or not all(p.isdigit() and int(p) > 0 for p in partes):
             return False, "Faixa inválida. Use números maiores que 0 (ex: '3' ou '3/12')."
+        
+    elif tag == "genre" and valor.isdigit():
+        return False, "Por favor, digite o nome do gênero por extenso (letras)."
             
     else:
         if not valor:
