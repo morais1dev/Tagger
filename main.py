@@ -1,8 +1,17 @@
+import os, subprocess
 from pathlib import Path
-from metadata import ler_tags, abrir_arquivo, editar_tags, bulk_edit, TAGS_EDITAVEIS, tags_bulk
+from metadata import ler_tags, abrir_arquivo, editar_tags, bulk_edit, TAGS_EDITAVEIS, tags_bulk, validar_valor
 from interface import selecionar_arquivo
 
+
+def limpar_tela():
+    comando = 'cls' if os.name == 'nt' else 'clear'
+    subprocess.run(comando, shell = True)
+    
+
+
 def mostrar_tags(tags):
+    limpar_tela()
     print("\nTags disponíveis:")
 
     for numero, valor in tags.items():
@@ -26,30 +35,45 @@ def escolher_tag():
 
 
 def editar_arquivo(arquivo):
-    print(f"\nArquivo: {arquivo}")
-
     audio = abrir_arquivo(arquivo)
 
     if audio is None:
         print("Formato não suportado.")
+        input("\nPressione Enter para continuar...")
         return False
+
+    teve_alteracao = False
 
     while True:
         mostrar_tags(ler_tags(audio))
+        print(f"\nArquivo atual: {Path(arquivo).name}")
 
         tag = escolher_tag()
         if tag is None:
             break
 
-        novo_valor = input(f"Novo valor para {tag}: ")
+        while True:
+            novo_valor_input = input(f"Novo valor para {tag} (ou 'atual' para ano): ").strip()
+            valido, resultado = validar_valor(tag, novo_valor_input)
+            
+            if not valido:
+                print(resultado)
+                continue
+                
+            novo_valor = resultado
+            break
+
         editar_tags(audio, tag, novo_valor)
         print("Tag editada com sucesso.")
+        teve_alteracao = True
+        input("\nPressione Enter para continuar...")
 
     print("Edição do arquivo finalizada.")
-    return True
+    return teve_alteracao
 
 
 def mostrar_arquivos(arquivos, editados):
+    limpar_tela()
     print("\nArquivos selecionados:")
 
     for numero, arquivo in enumerate(arquivos, start=1):
@@ -81,6 +105,7 @@ def modo_individual():
 
     if not arquivos:
         print("Nenhum arquivo selecionado.")
+        input("\nPressione Enter para continuar...")
         return
 
     editados = set()
@@ -95,17 +120,21 @@ def modo_individual():
         if editar_arquivo(arquivo):
             editados.add(arquivo)
 
+
 def mostrar_bulk_arquivos(arquivos):
+    limpar_tela()
     print(f"\nQuantidade de arquivos selecionados: {len(arquivos)}")
     for numero, arquivo in enumerate(arquivos, start=1):
         nome = Path(arquivo).name
         print(f"{numero} - {nome}")
+
 
 def mostrar_bulk_tags():
     print("\nTags disponiveis: ")
     for num, tag in enumerate(tags_bulk(), start=1):
         print(f"{num} - {tag}")
     print("0 - Cancelar")
+
 
 def selecionar_bulk_tags():
     tags = tags_bulk()
@@ -121,11 +150,13 @@ def selecionar_bulk_tags():
         except (ValueError, IndexError):
             print("Opção inválida.")
 
+
 def modo_bulk():
     arquivos = selecionar_arquivo()
 
     if not arquivos:
         print("Nenhum arquivo selecionado.")
+        input("\nPressione Enter para continuar...")
         return
 
     mostrar_bulk_arquivos(arquivos)
@@ -135,15 +166,21 @@ def modo_bulk():
 
     if tag is None:
         print("Operação cancelada.")
+        input("\nPressione Enter para continuar...")
         return
     
     print(f"Tag escolhida: {tag}")
 
-    valor = input(f"Insira o novo valor para a tag {tag}: ").strip()
-
-    while not valor:
-        print("O valor não pode ficar em branco.")
-        valor = input(f"Insira o novo valor para a tag {tag}: ").strip()
+    while True:
+        valor_input = input(f"Insira o novo valor para a tag {tag} (ou 'atual' para ano): ").strip()
+        valido, resultado = validar_valor(tag, valor_input)
+        
+        if not valido:
+            print(resultado)
+            continue
+            
+        valor = resultado
+        break
 
     while True:
         confirmacao = input(f"Confirmar alteração da tag '{tag}' para '{valor}' em {len(arquivos)} arquivo(s)? (S/N): ").strip().upper()
@@ -156,11 +193,15 @@ def modo_bulk():
     if confirmacao == 'S':
         print(f"\nAplicando alterações...")
         bulk_edit(arquivos, tag, valor)
+        print("Alterações aplicadas com sucesso!")
     else:
         print("\nOperação cancelada pelo usuário.")
-    
+        
+    input("\nPressione Enter para continuar...")
+
 
 def mostrar_menu():
+    limpar_tela()
     print("\n=== Tagger ===")
     print("1 - Edição individual")
     print("2 - Bulk edit")
@@ -180,6 +221,7 @@ def main():
             break
         else:
             print("Opção inválida.")
+            input("\nPressione Enter para continuar...")
 
     print("\nPrograma finalizado.")
 
