@@ -1,22 +1,24 @@
 import os, subprocess
 from pathlib import Path
-from metadata import ler_tags, abrir_arquivo, editar_tags, bulk_edit, TAGS_EDITAVEIS, tags_bulk, validar_valor
+from metadata import CAMPOS, CAMPOS_BULK, carregar, salvar, salvar_varios, validar_valor, rotulo
 from interface import selecionar_arquivo
+
+# Na CLI os campos são escolhidos por número: 1 = primeiro campo de CAMPOS, etc.
+LISTA_CAMPOS = list(CAMPOS)
 
 
 def limpar_tela():
     comando = 'cls' if os.name == 'nt' else 'clear'
     subprocess.run(comando, shell = True)
-    
+
 
 
 def mostrar_tags(tags):
     limpar_tela()
     print("\nTags disponíveis:")
 
-    for numero, valor in tags.items():
-        tag = TAGS_EDITAVEIS[numero]
-        print(f"{numero} - {tag}: {valor}")
+    for numero, campo in enumerate(LISTA_CAMPOS, start=1):
+        print(f"{numero} - {rotulo(campo)}: {tags.get(campo, '')}")
 
     print("0 - Finalizar edição deste arquivo")
 
@@ -29,41 +31,55 @@ def escolher_tag():
             return None
 
         try:
-            return TAGS_EDITAVEIS[int(escolha)]
-        except (ValueError, KeyError):
+            numero = int(escolha)
+            if numero < 1:
+                raise IndexError
+            return LISTA_CAMPOS[numero - 1]
+        except (ValueError, IndexError):
             print("Opção inválida.")
 
 
-def editar_arquivo(arquivo):
-    audio = abrir_arquivo(arquivo)
+def pedir_valor(campo):
+    """Pede um valor válido. Enter vazio cancela; '-' remove a tag."""
+    while True:
+        dica = " ('atual' = ano atual)" if campo == "date" else ""
+        entrada = input(f"Novo valor para {rotulo(campo)}{dica} (Enter cancela, '-' remove): ").strip()
 
-    if audio is None:
-        print("Formato não suportado.")
+        if entrada == "":
+            return None
+        if entrada == "-":
+            return ""
+
+        valido, resultado = validar_valor(campo, entrada)
+        if valido:
+            return resultado
+        print(resultado)
+
+
+def editar_arquivo(arquivo):
+    faixa = carregar(arquivo)
+
+    if faixa is None:
+        print("Formato não suportado ou arquivo inválido.")
         input("\nPressione Enter para continuar...")
         return False
 
     teve_alteracao = False
 
     while True:
-        mostrar_tags(ler_tags(audio))
-        print(f"\nArquivo atual: {Path(arquivo).name}")
+        mostrar_tags(faixa.tags)
+        print(f"\nArquivo atual: {faixa.nome}")
 
-        tag = escolher_tag()
-        if tag is None:
+        campo = escolher_tag()
+        if campo is None:
             break
 
-        while True:
-            novo_valor_input = input(f"Novo valor para {tag} (ou 'atual' para ano): ").strip()
-            valido, resultado = validar_valor(tag, novo_valor_input)
-            
-            if not valido:
-                print(resultado)
-                continue
-                
-            novo_valor = resultado
-            break
+        novo_valor = pedir_valor(campo)
+        if novo_valor is None:
+            continue
 
-        editar_tags(audio, tag, novo_valor)
+        salvar(arquivo, {campo: novo_valor})
+        faixa = carregar(arquivo)
         print("Tag editada com sucesso.")
         teve_alteracao = True
         input("\nPressione Enter para continuar...")
@@ -131,13 +147,13 @@ def mostrar_bulk_arquivos(arquivos):
 
 def mostrar_bulk_tags():
     print("\nTags disponiveis: ")
-    for num, tag in enumerate(tags_bulk(), start=1):
-        print(f"{num} - {tag}")
+    for num, campo in enumerate(CAMPOS_BULK, start=1):
+        print(f"{num} - {rotulo(campo)}")
     print("0 - Cancelar")
 
 
 def selecionar_bulk_tags():
-    tags = tags_bulk()
+    tags = CAMPOS_BULK
     while True:
         escolha = input("\nQual tag deseja editar em todos os arquivos? ")
         if escolha == "0":
@@ -169,21 +185,17 @@ def modo_bulk():
         input("\nPressione Enter para continuar...")
         return
     
-    print(f"Tag escolhida: {tag}")
+    print(f"Tag escolhida: {rotulo(tag)}")
 
-    while True:
-        valor_input = input(f"Insira o novo valor para a tag {tag} (ou 'atual' para ano): ").strip()
-        valido, resultado = validar_valor(tag, valor_input)
-        
-        if not valido:
-            print(resultado)
-            continue
-            
-        valor = resultado
-        break
+    valor = pedir_valor(tag)
+    if valor is None:
+        print("Operação cancelada.")
+        input("\nPressione Enter para continuar...")
+        return
 
+    descricao = f"para '{valor}'" if valor else "(remover)"
     while True:
-        confirmacao = input(f"Confirmar alteração da tag '{tag}' para '{valor}' em {len(arquivos)} arquivo(s)? (S/N): ").strip().upper()
+        confirmacao = input(f"Confirmar alteração da tag '{rotulo(tag)}' {descricao} em {len(arquivos)} arquivo(s)? (S/N): ").strip().upper()
         
         if confirmacao in ['S', 'N']:
             break 
@@ -192,8 +204,13 @@ def modo_bulk():
 
     if confirmacao == 'S':
         print(f"\nAplicando alterações...")
-        bulk_edit(arquivos, tag, valor)
-        print("Alterações aplicadas com sucesso!")
+        falhas = salvar_varios(arquivos, {tag: valor})
+        if falhas:
+            print(f"{len(arquivos) - len(falhas)} arquivo(s) alterado(s). Falharam:")
+            for caminho, erro in falhas.items():
+                print(f"  - {caminho.name}: {erro}")
+        else:
+            print("Alterações aplicadas com sucesso!")
     else:
         print("\nOperação cancelada pelo usuário.")
         
