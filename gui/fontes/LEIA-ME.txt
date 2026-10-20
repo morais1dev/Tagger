@@ -1,0 +1,2 @@
+Coloque aqui arquivos .ttf/.otf (ex.: Geist e Geist Mono, do Google Fonts)
+para o Tagger usar a mesma fonte do mockup. Sem eles, usa a fonte do sistema.

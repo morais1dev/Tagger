@@ -16,7 +16,7 @@ from pathlib import Path
 import re
 
 from mutagen.id3 import (
-    ID3, APIC, COMM, TALB, TCOM, TCON, TDRC, TEXT, TIT2, TPE1, TPE2, TPOS, TRCK,
+    APIC, COMM, TALB, TCOM, TCON, TDRC, TEXT, TIT2, TPE1, TPE2, TPOS, TRCK,
 )
 from mutagen.mp3 import MP3, HeaderNotFoundError
 
