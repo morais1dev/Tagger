@@ -1,2 +1,2 @@
-mutagen==1.47.0
+mutagen==1.48.1cl
 PySide6>=6.6
