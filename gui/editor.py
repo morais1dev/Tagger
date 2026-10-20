@@ -1,23 +1,24 @@
 """
 Painel de edição (lado esquerdo): capa + campos de tags.
 
-Funciona igual para 1 ou vários arquivos selecionados:
+Tudo o que é digitado aqui vai para o rascunho (alterações pendentes por arquivo).
+Para 1 ou vários arquivos selecionados:
 - campo com o mesmo valor em todos -> mostra o valor;
 - campo com valores diferentes -> fica vazio com o texto ‹vários valores›
-  e só é alterado se você digitar algo nele.
+  e só é alterado se você digitar algo nele (apagar o que digitou volta ao estado anterior).
 """
 
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtGui import QFont, QImage, QPainter, QPainterPath, QPixmap
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRectF, QStringListModel, Qt, Signal
+from PySide6.QtGui import QImage, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
-    QCompleter, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
-    QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
+    QApplication, QCompleter, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QPlainTextEdit, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from metadata import VARIOS, ler_capa, rotulo, valores_comuns
-from gui.icones import pixmap
+from metadata import ler_capa, rotulo, validar_valor
+from gui.icones import icone, pixmap
 from gui.tema import repolir
 
 CAMPOS_LARGOS_1 = ["title", "artist", "album", "albumartist"]
@@ -29,20 +30,44 @@ CAMPOS_MONO = {"tracknumber", "discnumber", "date"}
 TEXTO_VARIOS = "‹vários valores›"
 LADO_CAPA = 112
 LIMITE_COMPARAR_CAPAS = 150     # acima disso não compara as capas uma a uma
-
-GENEROS = [
-    "Alternative", "Ambient", "Axé", "Blues", "Bossa Nova", "Classical", "Country", "Dance",
-    "Disco", "Drum & Bass", "Electronic", "Folk", "Forró", "Funk", "Gospel", "Hard Rock",
-    "Heavy Metal", "Hip-Hop", "House", "Indie", "Indie Rock", "Jazz", "Lo-Fi", "Metal",
-    "MPB", "Pagode", "Pop", "Pop Rock", "Punk", "R&B", "Rap", "Reggae", "Rock", "Samba",
-    "Sertanejo", "Soul", "Soundtrack", "Synthpop", "Techno", "Trap",
-]
+EXTENSOES_IMAGEM = (".jpg", ".jpeg", ".png")
 
 
+# ---------------------------------------------------------------------------- imagens
 def _rotulo(texto, papel):
     lbl = QLabel(texto)
     lbl.setProperty("papel", papel)
     return lbl
+
+
+def imagem_para_bytes(imagem):
+    """QImage -> (bytes, mime). PNG se tiver transparência, senão JPEG."""
+    dados = QByteArray()
+    buffer = QBuffer(dados)
+    buffer.open(QIODevice.WriteOnly)
+    if imagem.hasAlphaChannel():
+        imagem.save(buffer, "PNG")
+        mime = "image/png"
+    else:
+        imagem.convertToFormat(QImage.Format_RGB32).save(buffer, "JPEG", 92)
+        mime = "image/jpeg"
+    buffer.close()
+    return bytes(dados), mime
+
+
+def imagem_do_mime(mime_data):
+    """Lê uma imagem de um arrastar/colar: arquivo de imagem ou imagem copiada. (bytes, mime) ou None."""
+    for url in mime_data.urls() if mime_data.hasUrls() else []:
+        caminho = Path(url.toLocalFile())
+        if caminho.suffix.lower() in EXTENSOES_IMAGEM and caminho.is_file():
+            dados = caminho.read_bytes()
+            if not QImage.fromData(dados).isNull():
+                return dados, ("image/png" if caminho.suffix.lower() == ".png" else "image/jpeg")
+    if mime_data.hasImage():
+        imagem = QImage(mime_data.imageData())
+        if not imagem.isNull():
+            return imagem_para_bytes(imagem)
+    return None
 
 
 def _capa_arredondada(dados, lado, dpr, raio=10):
@@ -74,26 +99,68 @@ def _descrever_capa(dados, mime):
     return f"{formato} · {imagem.width()}×{imagem.height()} · {tamanho}"
 
 
+class QuadroCapa(QLabel):
+    """Quadro da capa: aceita imagem arrastada e tem menu de clique direito."""
+    imagemSolta = Signal(object, str)
+    menuPedido = Signal(object)
+
+    def __init__(self):
+        super().__init__(objectName="capa", alignment=Qt.AlignCenter)
+        self.setFixedSize(LADO_CAPA, LADO_CAPA)
+        self.setWordWrap(True)
+        self.setAcceptDrops(True)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(lambda pos: self.menuPedido.emit(self.mapToGlobal(pos)))
+        self.setToolTip("Arraste uma imagem aqui ou clique com o botão direito")
+
+    def _arrastando(self, ativo):
+        self.setProperty("arrastando", ativo)
+        repolir(self)
+
+    def dragEnterEvent(self, evento):
+        dados = evento.mimeData()
+        tem_imagem = dados.hasImage() or any(
+            Path(u.toLocalFile()).suffix.lower() in EXTENSOES_IMAGEM for u in dados.urls())
+        if tem_imagem and self.isEnabled():
+            evento.acceptProposedAction()
+            self._arrastando(True)
+        else:
+            evento.ignore()
+
+    def dragLeaveEvent(self, evento):
+        self._arrastando(False)
+
+    def dropEvent(self, evento):
+        self._arrastando(False)
+        imagem = imagem_do_mime(evento.mimeData())
+        if imagem:
+            evento.acceptProposedAction()
+            self.imagemSolta.emit(imagem[0], imagem[1])
+
+
+# ---------------------------------------------------------------------------- painel
 class PainelEditor(QWidget):
-    alterado = Signal()            # mudou o estado de "tem alterações pendentes"
+    alterado = Signal()            # algo no painel mudou o rascunho
     salvarPedido = Signal()
     descartarPedido = Signal()
+    aviso = Signal(str)            # mensagem curta para a barra de status
 
-    def __init__(self, parent=None):
+    def __init__(self, rascunho, parent=None):
         super().__init__(parent)
         self.setObjectName("painel")
         self.setAttribute(Qt.WA_StyledBackground, True)
 
+        self.rascunho = rascunho
         self.cores = {}
-        self.fonte_mono = QFont()
         self._faixas = []
-        self._originais = {}       # campo -> texto mostrado ao carregar
-        self._sujos = set()        # campos editados pelo usuário
+        self._varios = {}          # campo -> True se os valores eram diferentes ao carregar
+        self._fotos = {}           # campo -> fotografia do rascunho ao carregar
         self._carregando = False
-        self._capa_pendente = None # None | ("definir", dados, mime) | ("remover",)
-        self._capa_atual = None    # (dados, mime) da capa mostrada, se houver
-        self._capa_texto = ""      # texto quando não há imagem ("Sem capa", "‹várias capas›")
+        self._editando = False     # True enquanto o próprio painel mexe no rascunho
+        self._capas_disco = {}     # cache: caminho -> (dados, mime) | None
+        self._capa_mostrada = None # (dados, mime) da capa em exibição, se houver
         self.campos = {}           # campo -> (widget, rótulo)
+        self._modelo_generos = QStringListModel(self)
 
         self.pilha = QStackedWidget()
         self.pilha.addWidget(self._criar_vazio())
@@ -107,17 +174,20 @@ class PainelEditor(QWidget):
     def _criar_vazio(self):
         w = QWidget()
         v = QVBoxLayout(w)
-        v.setContentsMargins(32, 32, 32, 32)
         v.addStretch()
         self.icone_vazio = QLabel(alignment=Qt.AlignCenter)
         titulo = QLabel("Nenhum arquivo selecionado", objectName="painelVazioTitulo", alignment=Qt.AlignCenter)
-        texto = QLabel("Clique em uma música para editar.\nUse Ctrl ou Shift para editar várias de uma vez.",
+        texto = QLabel("Clique em uma música para editar.\nUse Ctrl, Shift ou arraste o mouse para editar várias.",
                        objectName="painelVazioTexto", alignment=Qt.AlignCenter)
         texto.setWordWrap(True)
+        texto.setContentsMargins(32, 0, 32, 0)
         for item in (self.icone_vazio, titulo, texto):
             v.addWidget(item)
         v.setSpacing(10)
         v.addStretch()
+        self.rodape_vazio = self._criar_rodape()
+        v.addWidget(self.rodape_vazio[0])
+        v.setContentsMargins(0, 32, 0, 0)
         return w
 
     def _criar_conteudo(self):
@@ -126,7 +196,6 @@ class PainelEditor(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
 
-        # topo: título e subtítulo
         topo = QWidget(objectName="painelTopo")
         topo.setAttribute(Qt.WA_StyledBackground, True)
         vt = QVBoxLayout(topo)
@@ -139,7 +208,6 @@ class PainelEditor(QWidget):
         vt.addWidget(self.lbl_sub)
         v.addWidget(topo)
 
-        # corpo rolável
         corpo = QWidget(objectName="corpoPainel")
         corpo.setAttribute(Qt.WA_StyledBackground, True)
         vc = QVBoxLayout(corpo)
@@ -169,48 +237,58 @@ class PainelEditor(QWidget):
         rolagem.setWidget(corpo)
         v.addWidget(rolagem, 1)
 
-        # rodapé fixo
+        self.rodape = self._criar_rodape()
+        v.addWidget(self.rodape[0])
+        return w
+
+    def _criar_rodape(self):
         rodape = QWidget(objectName="painelRodape")
         rodape.setAttribute(Qt.WA_StyledBackground, True)
         hr = QHBoxLayout(rodape)
         hr.setContentsMargins(20, 12, 20, 12)
         hr.setSpacing(8)
         hr.addStretch()
-        self.btn_descartar = QPushButton("Descartar")
-        self.btn_descartar.setProperty("tipo", "fantasma")
-        self.btn_descartar.clicked.connect(self.descartarPedido)
-        self.btn_salvar = QPushButton("Salvar")
-        self.btn_salvar.setProperty("tipo", "primario")
-        self.btn_salvar.clicked.connect(self.salvarPedido)
-        hr.addWidget(self.btn_descartar)
-        hr.addWidget(self.btn_salvar)
-        v.addWidget(rodape)
-        return w
+        descartar = QPushButton("Descartar")
+        descartar.setProperty("tipo", "fantasma")
+        descartar.setToolTip("Descartar todas as alterações não salvas")
+        descartar.clicked.connect(self.descartarPedido)
+        salvar = QPushButton("Salvar")
+        salvar.setProperty("tipo", "primario")
+        salvar.setToolTip("Salvar todas as alterações pendentes (Ctrl+S)")
+        salvar.clicked.connect(self.salvarPedido)
+        hr.addWidget(descartar)
+        hr.addWidget(salvar)
+        return rodape, descartar, salvar
 
     def _criar_bloco_capa(self):
         h = QHBoxLayout()
         h.setSpacing(14)
-        self.lbl_capa = QLabel(objectName="capa", alignment=Qt.AlignCenter)
-        self.lbl_capa.setFixedSize(LADO_CAPA, LADO_CAPA)
-        self.lbl_capa.setWordWrap(True)
-        h.addWidget(self.lbl_capa)
+        self.quadro_capa = QuadroCapa()
+        self.quadro_capa.imagemSolta.connect(lambda dados, mime: self._definir_capa(("definir", dados, mime)))
+        self.quadro_capa.menuPedido.connect(self._menu_capa)
+        h.addWidget(self.quadro_capa)
 
         lado = QVBoxLayout()
         lado.setSpacing(6)
         lado.addStretch()
         self.lbl_info_capa = _rotulo("", "info")
-        self.lbl_info_capa.setProperty("mono", True)
         self.lbl_info_capa.setTextFormat(Qt.RichText)
+        self.lbl_info_capa.setProperty("mono", True)
+        self.lbl_info_capa.setWordWrap(True)
         lado.addWidget(self.lbl_info_capa)
         botoes = QHBoxLayout()
         botoes.setSpacing(6)
         self.btn_trocar_capa = QPushButton("Trocar capa")
         self.btn_trocar_capa.clicked.connect(self._escolher_capa)
-        self.btn_remover_capa = QPushButton("Remover")
-        self.btn_remover_capa.setProperty("tipo", "fantasma")
-        self.btn_remover_capa.clicked.connect(self._remover_capa)
+        self.btn_mais_capa = QPushButton()
+        self.btn_mais_capa.setProperty("tipo", "fantasma")
+        self.btn_mais_capa.setFixedWidth(34)
+        self.btn_mais_capa.setToolTip("Mais opções da capa")
+        self.btn_mais_capa.setAccessibleName("Mais opções da capa")
+        self.btn_mais_capa.clicked.connect(
+            lambda: self._menu_capa(self.btn_mais_capa.mapToGlobal(self.btn_mais_capa.rect().bottomLeft())))
         botoes.addWidget(self.btn_trocar_capa)
-        botoes.addWidget(self.btn_remover_capa)
+        botoes.addWidget(self.btn_mais_capa)
         botoes.addStretch()
         lado.addLayout(botoes)
         h.addLayout(lado, 1)
@@ -236,7 +314,7 @@ class PainelEditor(QWidget):
             if campo in CAMPOS_MONO:
                 widget.setProperty("mono", True)
             if campo == "genre":
-                completar = QCompleter(GENEROS, widget)
+                completar = QCompleter(self._modelo_generos, widget)
                 completar.setCaseSensitivity(Qt.CaseInsensitive)
                 completar.setFilterMode(Qt.MatchContains)
                 completar.popup().setObjectName("popupCompletar")
@@ -248,47 +326,50 @@ class PainelEditor(QWidget):
         return caixa
 
     # ------------------------------------------------------------------ aparência
-    def definir_aparencia(self, cores, fonte_mono):
+    def definir_aparencia(self, cores):
         self.cores = cores
-        self.fonte_mono = fonte_mono
         self.icone_vazio.setPixmap(pixmap("musica", cores["muted"], 28, espessura=1.5))
+        self.btn_mais_capa.setIcon(icone("mais", cores["muted"]))
         for campo in self.campos:
             self._atualizar_rotulo(campo)
         self._mostrar_capa()
 
+    def definir_generos(self, generos):
+        self._modelo_generos.setStringList(sorted(set(generos), key=str.casefold))
+
     # ------------------------------------------------------------------ carregar
     def carregar(self, faixas):
-        """Mostra no painel os valores da seleção atual (descarta edições não salvas)."""
+        """Mostra a seleção atual (valores do rascunho por cima dos do arquivo)."""
         self._faixas = list(faixas)
-        self._sujos.clear()
-        self._capa_pendente = None
-
         if not self._faixas:
             self.pilha.setCurrentIndex(0)
-            self.alterado.emit()
+            self.atualizar_rodape()
             return
         self.pilha.setCurrentIndex(1)
 
+        caminhos = [f.caminho for f in self._faixas]
         self._carregando = True
-        comuns = valores_comuns(self._faixas)
         for campo, (widget, _lbl) in self.campos.items():
-            varios = comuns[campo] == VARIOS
-            texto = "" if varios else comuns[campo]
-            self._originais[campo] = texto
+            valores = {self.rascunho.valor(f, campo) for f in self._faixas}
+            varios = len(valores) > 1
+            texto = "" if varios else valores.pop()
+            self._varios[campo] = varios
+            self._fotos[campo] = self.rascunho.fotografar(caminhos, campo)
             if isinstance(widget, QPlainTextEdit):
-                widget.setPlainText(texto)
-            else:
+                if widget.toPlainText() != texto:
+                    widget.setPlainText(texto)
+            elif widget.text() != texto:
                 widget.setText(texto)
                 widget.setCursorPosition(0)
             widget.setPlaceholderText(TEXTO_VARIOS if varios else "")
-            self._definir_erro(campo, False)
+            self._validar_campo(campo, texto)
             self._atualizar_rotulo(campo)
         self._carregando = False
 
         n = len(self._faixas)
         if n == 1:
             f = self._faixas[0]
-            self.lbl_titulo.setText(f.tags["title"] or f.nome)
+            self.lbl_titulo.setText(self.rascunho.valor(f, "title") or f.nome)
             self.lbl_sub.setText(f"{f.nome} · {f.duracao_formatada} · {f.bitrate} kbps")
             self.lbl_sub.setToolTip(str(f.caminho))
         else:
@@ -296,54 +377,136 @@ class PainelEditor(QWidget):
             self.lbl_sub.setText("Campos diferentes aparecem como ‹vários valores› e só mudam se você editar.")
             self.lbl_sub.setToolTip("")
 
-        self._carregar_capa()
-        self._atualizar_rodape()
-        self.alterado.emit()
-
-    def _carregar_capa(self):
-        self._capa_atual = None
-        com_capa = {f.tem_capa for f in self._faixas}
-
-        if com_capa == {False}:
-            self._capa_texto = "Sem capa"
-        elif len(com_capa) > 1 or len(self._faixas) > LIMITE_COMPARAR_CAPAS:
-            self._capa_texto = "‹várias capas›"
-        else:
-            primeira = ler_capa(self._faixas[0].caminho)
-            iguais = primeira is not None and all(
-                ler_capa(f.caminho) == primeira for f in self._faixas[1:])
-            if iguais:
-                self._capa_atual = primeira
-            else:
-                self._capa_texto = "‹várias capas›" if len(self._faixas) > 1 else "Sem capa"
-
-        self.btn_remover_capa.setEnabled(True in com_capa)
         self._mostrar_capa()
+        self.atualizar_rodape()
+
+    def ao_mudar_rascunho(self):
+        """O rascunho mudou por fora (desfazer, colar, tabela...): mostra os novos valores."""
+        if not self._editando:
+            self.carregar(self._faixas)
+        else:
+            self.atualizar_rodape()
+
+    def invalidar_capas(self, caminhos=None):
+        if caminhos is None:
+            self._capas_disco.clear()
+        else:
+            for caminho in caminhos:
+                self._capas_disco.pop(caminho, None)
+
+    # ------------------------------------------------------------------ capa
+    def _capa_efetiva(self, faixa):
+        """(dados, mime) ou None, já considerando o rascunho."""
+        pendente = self.rascunho.capa(faixa.caminho)
+        if pendente is not None:
+            return (pendente[1], pendente[2]) if pendente[0] == "definir" else None
+        if not faixa.tem_capa:
+            return None
+        if faixa.caminho not in self._capas_disco:
+            self._capas_disco[faixa.caminho] = ler_capa(faixa.caminho)
+        return self._capas_disco[faixa.caminho]
 
     def _mostrar_capa(self):
-        if not hasattr(self, "lbl_capa"):
+        if not hasattr(self, "quadro_capa"):
             return
-        pendente = self._capa_pendente
-        dados = None
-        if pendente and pendente[0] == "definir":
-            dados, mime = pendente[1], pendente[2]
-        elif pendente is None and self._capa_atual:
-            dados, mime = self._capa_atual
+        faixas = self._faixas
+        pendentes = [self.rascunho.capa(f.caminho) for f in faixas]
+        tem_pendente = any(p is not None for p in pendentes)
 
-        imagem = _capa_arredondada(dados, LADO_CAPA, self.devicePixelRatioF()) if dados else None
+        capa, texto = None, "Sem capa"
+        if faixas:
+            if len(faixas) > LIMITE_COMPARAR_CAPAS and not tem_pendente:
+                todas_sem = not any(f.tem_capa for f in faixas)
+                texto = "Sem capa" if todas_sem else "‹várias capas›"
+            else:
+                efetivas = [self._capa_efetiva(f) for f in faixas]
+                primeira = efetivas[0]
+                if all(e == primeira for e in efetivas[1:]):
+                    capa = primeira
+                else:
+                    texto = "‹várias capas›"
+
+        self._capa_mostrada = capa
+        imagem = _capa_arredondada(capa[0], LADO_CAPA, self.devicePixelRatioF()) if capa else None
         if imagem is not None:
-            self.lbl_capa.setPixmap(imagem)
-            info = _descrever_capa(dados, mime)
+            self.quadro_capa.setText("")
+            self.quadro_capa.setPixmap(imagem)
+            info = _descrever_capa(capa[0], capa[1])
         else:
-            self.lbl_capa.setPixmap(QPixmap())
-            self.lbl_capa.setText("Sem capa" if pendente else self._capa_texto)
-            info = "Nenhuma imagem" if (pendente or self._capa_texto == "Sem capa") else "Capas diferentes"
+            self.quadro_capa.setPixmap(QPixmap())
+            self.quadro_capa.setText(texto)
+            info = "Capas diferentes" if texto.startswith("‹") else "Nenhuma imagem"
 
-        if pendente and self.cores:
-            acao = "Nova capa" if pendente[0] == "definir" else "Capa será removida"
+        if tem_pendente and self.cores:
+            todas_remover = all(p is not None and p[0] == "remover" for p in pendentes)
+            acao = "Capa será removida" if todas_remover else "Nova capa"
             info = (f'<span style="color:{self.cores["text"]}">{acao}</span> '
                     f'<span style="color:{self.cores["accent"]}">●</span><br>{info}')
         self.lbl_info_capa.setText(info)
+
+    def _definir_capa(self, acao):
+        if not self._faixas:
+            return
+        self._editando = True
+        try:
+            self.rascunho.definir_capa([f.caminho for f in self._faixas], acao)
+        finally:
+            self._editando = False
+        self._mostrar_capa()
+        self.atualizar_rodape()
+        self.alterado.emit()
+
+    def _escolher_capa(self):
+        caminho, _ = QFileDialog.getOpenFileName(self, "Escolher capa", "", "Imagens (*.jpg *.jpeg *.png)")
+        if not caminho:
+            return
+        dados = Path(caminho).read_bytes()
+        if QImage.fromData(dados).isNull():
+            self.aviso.emit("Não consegui abrir essa imagem.")
+            return
+        mime = "image/png" if caminho.lower().endswith(".png") else "image/jpeg"
+        self._definir_capa(("definir", dados, mime))
+
+    def colar_capa(self):
+        imagem = imagem_do_mime(QApplication.clipboard().mimeData())
+        if imagem is None:
+            self.aviso.emit("Não há imagem na área de transferência.")
+            return
+        self._definir_capa(("definir", imagem[0], imagem[1]))
+
+    def _exportar_capa(self):
+        if not self._capa_mostrada:
+            return
+        dados, mime = self._capa_mostrada
+        extensao = ".png" if mime == "image/png" else ".jpg"
+        sugestao = (self.rascunho.valor(self._faixas[0], "album") or "capa") + extensao
+        sugestao = "".join(c for c in sugestao if c not in '\\/:*?"<>|')
+        pasta = self._faixas[0].caminho.parent
+        destino, _ = QFileDialog.getSaveFileName(self, "Exportar capa", str(pasta / sugestao),
+                                                 f"Imagem (*{extensao})")
+        if destino:
+            Path(destino).write_bytes(dados)
+            self.aviso.emit(f"Capa exportada para {Path(destino).name}")
+
+    def _menu_capa(self, posicao_global):
+        if not self._faixas:
+            return
+        menu = QMenu(self)
+        menu.addAction("Escolher imagem…", self._escolher_capa)
+        acao_colar = menu.addAction("Colar imagem", self.colar_capa)
+        dados_area = QApplication.clipboard().mimeData()
+        acao_colar.setEnabled(imagem_do_mime(dados_area) is not None)
+        acao_exportar = menu.addAction("Exportar capa…", self._exportar_capa)
+        acao_exportar.setEnabled(self._capa_mostrada is not None)
+        menu.addSeparator()
+        tem_alguma = any(self._capa_efetiva(f) is not None for f in self._faixas[:LIMITE_COMPARAR_CAPAS]) \
+            or any(f.tem_capa for f in self._faixas)
+        acao_remover = menu.addAction("Remover capa", lambda: self._definir_capa(("remover",)))
+        acao_remover.setEnabled(tem_alguma)
+        pendente = any(self.rascunho.capa(f.caminho) is not None for f in self._faixas)
+        acao_manter = menu.addAction("Manter capa original", lambda: self._definir_capa(None))
+        acao_manter.setEnabled(pendente)
+        menu.exec(posicao_global)
 
     # ------------------------------------------------------------------ edição
     def _texto(self, campo):
@@ -351,20 +514,37 @@ class PainelEditor(QWidget):
         return widget.toPlainText() if isinstance(widget, QPlainTextEdit) else widget.text()
 
     def _ao_editar(self, campo):
-        if self._carregando:
+        if self._carregando or not self._faixas:
             return
-        if self._texto(campo) == self._originais.get(campo, ""):
-            self._sujos.discard(campo)      # voltou ao valor original
-        else:
-            self._sujos.add(campo)
-        self._definir_erro(campo, False)
+        texto = self._texto(campo)
+        self._editando = True
+        try:
+            if self._varios.get(campo) and texto == "":
+                self.rascunho.restaurar(self._fotos[campo], campo)   # apagou o que digitou: volta como estava
+            else:
+                self.rascunho.definir(self._faixas, campo, texto)
+        finally:
+            self._editando = False
+        self._validar_campo(campo, texto)
         self._atualizar_rotulo(campo)
-        self._atualizar_rodape()
+        if campo == "title" and len(self._faixas) == 1:
+            self.lbl_titulo.setText(texto or self._faixas[0].nome)
+        self.atualizar_rodape()
         self.alterado.emit()
+
+    def _validar_campo(self, campo, texto):
+        """Borda vermelha na hora em que o valor fica inválido (ex.: ano com 2 dígitos)."""
+        ok, mensagem = validar_valor(campo, texto)
+        widget = self.campos[campo][0]
+        erro = not ok
+        widget.setToolTip(mensagem if erro else "")
+        if bool(widget.property("erro")) != erro:
+            widget.setProperty("erro", erro)
+            repolir(widget)
 
     def _atualizar_rotulo(self, campo):
         _widget, lbl = self.campos[campo]
-        sujo = campo in self._sujos
+        sujo = any(self.rascunho.tem_campo(f.caminho, campo) for f in self._faixas)
         texto = rotulo(campo)
         if sujo and self.cores:
             texto += f'&nbsp;&nbsp;<span style="color:{self.cores["accent"]}">●</span>'
@@ -373,44 +553,19 @@ class PainelEditor(QWidget):
             lbl.setProperty("alterado", sujo)
             repolir(lbl)
 
-    def _definir_erro(self, campo, erro):
-        widget = self.campos[campo][0]
-        if bool(widget.property("erro")) != erro:
-            widget.setProperty("erro", erro)
-            repolir(widget)
-
-    def _atualizar_rodape(self):
-        n = len(self._faixas)
-        pendente = self.tem_pendencias()
-        self.btn_salvar.setText("Salvar" if not pendente else
-                                ("Salvar 1 arquivo" if n == 1 else f"Salvar {n} arquivos"))
-        self.btn_salvar.setEnabled(pendente)
-        self.btn_descartar.setEnabled(pendente)
+    def atualizar_rodape(self):
+        n = len(self.rascunho)
+        pendente = n > 0
+        texto = "Salvar" if not pendente else ("Salvar 1 arquivo" if n == 1 else f"Salvar {n} arquivos")
+        for _rodape, descartar, salvar in (self.rodape, self.rodape_vazio):
+            salvar.setText(texto)
+            salvar.setEnabled(pendente)
+            descartar.setEnabled(pendente)
+        self.rodape_vazio[0].setVisible(pendente)
 
     def _enter_no_campo(self):
-        if self.tem_pendencias():
+        if not self.rascunho.vazio:
             self.salvarPedido.emit()
-
-    def _escolher_capa(self):
-        caminho, _ = QFileDialog.getOpenFileName(
-            self, "Escolher capa", "", "Imagens (*.jpg *.jpeg *.png)")
-        if not caminho:
-            return
-        dados = Path(caminho).read_bytes()
-        if QImage.fromData(dados).isNull():
-            return
-        mime = "image/png" if caminho.lower().endswith(".png") else "image/jpeg"
-        self._capa_pendente = ("definir", dados, mime)
-        self.btn_remover_capa.setEnabled(True)
-        self._mostrar_capa()
-        self._atualizar_rodape()
-        self.alterado.emit()
-
-    def _remover_capa(self):
-        self._capa_pendente = ("remover",)
-        self._mostrar_capa()
-        self._atualizar_rodape()
-        self.alterado.emit()
 
     # ------------------------------------------------------------------ API pública
     @property
@@ -418,24 +573,17 @@ class PainelEditor(QWidget):
         return self._faixas
 
     @property
-    def capa_pendente(self):
-        return self._capa_pendente
+    def capa_mostrada(self):
+        return self._capa_mostrada
 
-    def tem_pendencias(self):
-        return bool(self._sujos) or self._capa_pendente is not None
-
-    def quantidade_pendente(self):
-        return len(self._sujos) + (1 if self._capa_pendente is not None else 0)
-
-    def alteracoes(self):
-        """Somente os campos que o usuário mexeu: {campo: texto}."""
-        return {campo: self._texto(campo).strip() for campo in self._sujos}
-
-    def marcar_erros(self, erros):
+    def marcar_erros(self, campos):
         primeiro = None
-        for campo in erros:
-            self._definir_erro(campo, True)
-            primeiro = primeiro or campo
+        for campo in campos:
+            if campo in self.campos:
+                widget = self.campos[campo][0]
+                widget.setProperty("erro", True)
+                repolir(widget)
+                primeiro = primeiro or campo
         if primeiro:
             self.campos[primeiro][0].setFocus()
 
