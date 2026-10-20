@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QThread, QTimer, QUrl, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QSettings, QThread, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QFont, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu,
@@ -23,6 +23,7 @@ from gui.configuracoes import DialogoConfiguracoes
 from gui.editor import PainelEditor
 from gui.icones import icone, icone_app, pixmap
 from gui.rascunho import Rascunho, executar_salvamento
+from gui.rotulo import Migalha, RotuloElidido
 from gui.tabela import FiltroFaixas, ModeloFaixas, TabelaFaixas
 from gui.vazio import TelaVazia
 
@@ -30,6 +31,7 @@ VERSAO = "2.0.0-dev"
 MAX_RECENTES = 6
 CHAVES_APARENCIA = ("usar_escuro", "tema_escuro", "tema_claro", "acento", "fonte", "fonte_mono",
                     "tamanho_fonte", "densidade")
+LARGURA_BARRA_COMPACTA = 1100    # abaixo disso os botões da barra superior ficam só com ícone
 
 
 # ============================================================================
@@ -110,6 +112,39 @@ def barra_de_titulo_escura(janela, escura):
         pass
 
 
+class FiltroJanelas(QObject):
+    """Filtro de eventos do app inteiro.
+
+    - QMenu e dicas (QToolTip) ganham fundo translúcido e sem sombra nativa, senão o border-radius
+      do QSS deixa cantos quadrados aparecendo no Windows;
+    - toda janela que abre (Configurações, QMessageBox, QColorDialog...) recebe a barra de título
+      escura/clara conforme o tema.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.escuro = True
+
+    def eventFilter(self, obj, evento):
+        tipo = evento.type()
+        if tipo == QEvent.Polish and obj.isWidgetType():
+            if (isinstance(obj, QMenu) or obj.metaObject().className() == "QTipLabel") \
+                    and not obj.testAttribute(Qt.WA_WState_Created):
+                obj.setAttribute(Qt.WA_TranslucentBackground, True)
+                obj.setWindowFlags(obj.windowFlags() | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+        elif tipo == QEvent.Show and obj.isWidgetType() and obj.isWindow() \
+                and not isinstance(obj, QMenu) and obj.metaObject().className() != "QTipLabel" \
+                and not obj.windowFlags() & Qt.FramelessWindowHint:
+            barra_de_titulo_escura(obj, self.escuro)
+        return False
+
+    def aplicar_em_todas(self, escuro):
+        self.escuro = escuro
+        for janela in QApplication.topLevelWidgets():
+            if janela.isVisible() and janela.isWindow() and not isinstance(janela, QMenu):
+                barra_de_titulo_escura(janela, escuro)
+
+
 # ============================================================================
 # Janela principal
 # ============================================================================
@@ -134,9 +169,10 @@ class JanelaPrincipal(QMainWindow):
         self._carregador = None
         self._salvador = None
         self._substituir_ao_carregar = False
+        self._config_pendente = None
+        self.filtro_janelas = None       # FiltroJanelas, instalado pelo main()
 
         self.setWindowTitle("Tagger")
-        self.resize(1440, 900)
         self.setMinimumSize(960, 600)
         self.setAcceptDrops(True)
 
@@ -156,6 +192,7 @@ class JanelaPrincipal(QMainWindow):
         self.tela_vazia.abrirPasta.connect(self.abrir_pasta)
         self.tela_vazia.escolherArquivos.connect(self.adicionar_arquivos)
         self.tela_vazia.abrirRecente.connect(lambda p: self.carregar_caminhos([p], substituir=True))
+        self.tela_vazia.removerRecente.connect(self._esquecer_recente)
         self.telas.addWidget(self.tela_vazia)
         self.telas.addWidget(self._criar_tela_principal())
         layout.addWidget(self.telas, 1)
@@ -163,27 +200,54 @@ class JanelaPrincipal(QMainWindow):
 
         self._timer_selecao = QTimer(self, singleShot=True, interval=60)
         self._timer_selecao.timeout.connect(self._carregar_selecao)
+        # a prévia das Configurações reaplica o tema só quando o usuário para de mexer
+        self._timer_config = QTimer(self, singleShot=True, interval=150)
+        self._timer_config.timeout.connect(self._aplicar_config_pendente)
 
         self._criar_barra_status()
         self._criar_acoes()
 
         self.tela_vazia.definir_recentes(self._recentes())
+        self.tela_vazia.definir_subpastas(self.config["subpastas"])
         self.aplicar_tema()
         self._atualizar_generos()
         self._atualizar_estado()
 
         geometria = self.settings.value("geometria")
-        if geometria:
-            self.restoreGeometry(geometria)
+        if not geometria or not self.restoreGeometry(geometria):
+            self._geometria_inicial()
+        self._encaixar_na_tela()
         cabecalho = self.settings.value("cabecalho_v2")
         if cabecalho:
-            self.tabela.horizontalHeader().restoreState(cabecalho)
+            self.tabela.restaurar_cabecalho(cabecalho)
+        if str(self.settings.value("painel_visivel", True)).lower() in ("false", "0"):
+            self.alternar_painel()
 
         ultima = self.settings.value("ultima_pasta_aberta", "")
         if self.config["reabrir_ultima"] and ultima and Path(ultima).is_dir():
             QTimer.singleShot(0, lambda: self.carregar_caminhos([ultima], substituir=True))
 
     # ------------------------------------------------------------------ montagem
+    def _geometria_inicial(self):
+        """1ª execução: ~85% da tela (no máximo 1440×900), centralizada."""
+        area = self.screen().availableGeometry()
+        largura = max(self.minimumWidth(), min(1440, int(area.width() * 0.85)))
+        altura = max(self.minimumHeight(), min(900, int(area.height() * 0.85)))
+        self.resize(min(largura, area.width()), min(altura, area.height()))
+        self.move(area.center() - self.rect().center())
+
+    def _encaixar_na_tela(self):
+        """A geometria salva pode ser de um monitor maior ou que não está mais conectado."""
+        if self.isMaximized() or self.isFullScreen():
+            return
+        area = self.screen().availableGeometry()
+        moldura = self.frameGeometry()
+        if moldura.width() > area.width() or moldura.height() > area.height():
+            self.resize(min(self.width(), area.width()), min(self.height(), area.height()))
+            moldura = self.frameGeometry()
+        if not area.contains(moldura.topLeft()) or not area.intersects(moldura):
+            self.move(area.center() - self.rect().center())
+
     def _criar_barra_topo(self):
         barra = QWidget(objectName="barraTopo")
         barra.setAttribute(Qt.WA_StyledBackground, True)
@@ -199,8 +263,11 @@ class JanelaPrincipal(QMainWindow):
 
         self.btn_abrir = QPushButton("Abrir pasta")
         self.btn_abrir.setToolTip("Abrir pasta (Ctrl+O)")
+        self.btn_abrir.setAccessibleName("Abrir pasta")
         self.btn_abrir.clicked.connect(lambda: self.abrir_pasta())
         self.btn_adicionar = QPushButton("Adicionar arquivos")
+        self.btn_adicionar.setToolTip("Adicionar arquivos")
+        self.btn_adicionar.setAccessibleName("Adicionar arquivos")
         self.btn_adicionar.clicked.connect(lambda: self.adicionar_arquivos())
         h.addWidget(self.btn_abrir)
         h.addWidget(self.btn_adicionar)
@@ -211,8 +278,10 @@ class JanelaPrincipal(QMainWindow):
         h.addWidget(separador)
         h.addSpacing(4)
 
+        self.btn_painel = self._botao_icone("Mostrar/esconder o editor (Ctrl+E)", self.alternar_painel)
         self.btn_desfazer = self._botao_icone("Desfazer (Ctrl+Z)", self.desfazer)
         self.btn_refazer = self._botao_icone("Refazer (Ctrl+Y)", self.refazer)
+        h.addWidget(self.btn_painel)
         h.addWidget(self.btn_desfazer)
         h.addWidget(self.btn_refazer)
         h.addStretch()
@@ -222,7 +291,8 @@ class JanelaPrincipal(QMainWindow):
         self.busca.setClearButtonEnabled(True)
         self.acao_busca = self.busca.addAction(icone("busca", "#888888"), QLineEdit.LeadingPosition)
         self.busca.textChanged.connect(self._ao_buscar)
-        h.addWidget(self.busca)
+        self.busca.setMinimumWidth(220)
+        h.addWidget(self.busca, 1)
 
         self.btn_config = self._botao_icone("Configurações (Ctrl+,)", self.abrir_configuracoes)
         self.btn_tema = self._botao_icone("Alternar tema claro/escuro", self.alternar_tema)
@@ -245,6 +315,32 @@ class JanelaPrincipal(QMainWindow):
         botao.clicked.connect(lambda: acao())
         return botao
 
+    def _botoes_icone(self):
+        return (self.btn_painel, self.btn_desfazer, self.btn_refazer, self.btn_config, self.btn_tema)
+
+    def _ajustar_barra_topo(self):
+        """Em janelas estreitas, "Abrir pasta"/"Adicionar arquivos" ficam só com ícone e a busca encolhe."""
+        compacta = self.width() < LARGURA_BARRA_COMPACTA
+        lado = tema.altura_botao(int(self.config["tamanho_fonte"]))
+        if (compacta, lado) == getattr(self, "_estado_barra", None):
+            return
+        self._estado_barra = (compacta, lado)
+        for botao, texto in ((self.btn_abrir, "Abrir pasta"), (self.btn_adicionar, "Adicionar arquivos")):
+            if compacta:
+                botao.setText("")
+                botao.setFixedSize(lado, lado)
+            else:
+                botao.setText(texto)
+                botao.setMinimumSize(0, 0)
+                botao.setMaximumSize(16777215, 16777215)
+            botao.setProperty("tipo", "fantasma" if compacta else None)
+            tema.repolir(botao)
+        self.busca.setMinimumWidth(140 if compacta else 220)
+
+    def resizeEvent(self, evento):
+        super().resizeEvent(evento)
+        self._ajustar_barra_topo()
+
     def _criar_tela_principal(self):
         self.painel = PainelEditor(self.rascunho)
         self.painel.alterado.connect(self._atualizar_estado)
@@ -261,8 +357,7 @@ class JanelaPrincipal(QMainWindow):
 
         cabecalho = QHBoxLayout()
         cabecalho.setContentsMargins(0, 12, 0, 12)
-        self.lbl_migalha = QLabel(objectName="migalha")
-        self.lbl_migalha.setTextFormat(Qt.RichText)
+        self.lbl_migalha = Migalha(objectName="migalha")
         self.lbl_contagem = QLabel(objectName="contagem")
         cabecalho.addWidget(self.lbl_migalha, 1)
         cabecalho.addWidget(self.lbl_contagem)
@@ -277,8 +372,15 @@ class JanelaPrincipal(QMainWindow):
         self.filtro.modelReset.connect(self._atualizar_contagem)
         v.addWidget(self.tabela, 1)
 
+        # aviso que aparece por cima da tabela ao arrastar arquivos para a janela
+        self.overlay_drop = QLabel("Solte para adicionar à lista", self.tabela, objectName="overlayDrop",
+                                   alignment=Qt.AlignCenter)
+        self.overlay_drop.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.overlay_drop.setAttribute(Qt.WA_StyledBackground, True)
+        self.overlay_drop.hide()
+
         divisor = QSplitter(Qt.Horizontal)
-        divisor.setHandleWidth(1)
+        divisor.setHandleWidth(7)      # fácil de pegar; o QSS desenha só a linha de 1px no meio
         divisor.setChildrenCollapsible(False)
         divisor.addWidget(self.painel)
         divisor.addWidget(direita)
@@ -295,22 +397,23 @@ class JanelaPrincipal(QMainWindow):
         barra = self.statusBar()
         barra.setSizeGripEnabled(False)
         self.lbl_status = QLabel()
-        self.lbl_pendente = QLabel(objectName="destaqueStatus")
-        self.lbl_pendente.setTextFormat(Qt.RichText)
-        self.lbl_aviso = QLabel(objectName="destaqueStatus")
-        self.lbl_aviso.setTextFormat(Qt.RichText)
+        self.lbl_pendente = RotuloElidido(objectName="destaqueStatus")
+        self.lbl_aviso = RotuloElidido(objectName="destaqueStatus")
         self.progresso = QProgressBar()
         self.progresso.setTextVisible(False)
+        politica = self.progresso.sizePolicy()
+        politica.setRetainSizeWhenHidden(True)      # o espaço fica reservado: nada se mexe ao aparecer/sumir
+        self.progresso.setSizePolicy(politica)
         self.progresso.setVisible(False)
         barra.addWidget(self.lbl_status)
-        barra.addWidget(self.progresso)
-        barra.addWidget(self.lbl_pendente)
-        barra.addWidget(self.lbl_aviso, 1)
+        barra.addWidget(self.lbl_pendente, 1)
+        barra.addWidget(self.lbl_aviso, 2)
         self.lbl_formato = QLabel()
         self.lbl_formato.setProperty("mono", True)
+        barra.addPermanentWidget(self.progresso)
         barra.addPermanentWidget(self.lbl_formato)
         self._timer_aviso = QTimer(self, singleShot=True, interval=6000)
-        self._timer_aviso.timeout.connect(lambda: self.lbl_aviso.setText(""))
+        self._timer_aviso.timeout.connect(lambda: self.lbl_aviso.definir(""))
 
     def _nova_acao(self, texto, teclas, funcao, contexto=Qt.WindowShortcut, alvo=None):
         acao = QAction(texto, self)
@@ -328,6 +431,7 @@ class JanelaPrincipal(QMainWindow):
         self._nova_acao("Refazer", ["Ctrl+Y", "Ctrl+Shift+Z"], self.refazer)
         self._nova_acao("Buscar", ["Ctrl+F"], self._focar_busca)
         self._nova_acao("Configurações", ["Ctrl+,"], self.abrir_configuracoes)
+        self._nova_acao("Mostrar/esconder o editor", ["Ctrl+E"], self.alternar_painel)
         self._nova_acao("Esc", ["Escape"], self._ao_escape)
         # ações das linhas (também aparecem no menu de clique direito)
         self.acao_numerar = self._nova_acao("Numerar faixas", ["Ctrl+Shift+N"], self.numerar_faixas)
@@ -363,38 +467,88 @@ class JanelaPrincipal(QMainWindow):
         app.setStyleSheet(tema.folha_de_estilo(cores, fonte_ui_nome, fonte_mono_nome, tamanho))
 
         escuro = tema.TEMAS.get(self._tema_atual(), {}).get("escuro", True)
+        lado = tema.altura_botao(tamanho)
+        for botao in self._botoes_icone():
+            botao.setFixedSize(lado, lado)
+
+        fonte_italico_base = QFont(fonte_ui_nome) if fonte_ui_nome else QFont()
+        fonte_italico_base.setPixelSize(tamanho)
+        self.modelo.definir_aparencia(cores, fonte_italico_base, self.fonte_mono)
+        self.tabela.definir_altura(tema.altura_linha(tamanho, c["densidade"]), tema.altura_cabecalho(tamanho))
+        self._atualizar_icones()
+        self.setWindowIcon(icone_app(cores["accent"], cores["on_accent"]))
+        if self.filtro_janelas is not None:
+            self.filtro_janelas.aplicar_em_todas(escuro)
+        else:
+            barra_de_titulo_escura(self, escuro)
+        self.lbl_formato.setText(f"MP3 · ID3v2.{metadata.VERSAO_ID3}")
+        self._ajustar_barra_topo()
+        self._fixar_largura_salvar()
+        self._atualizar_migalha()
+        self._atualizar_estado()
+
+    def _atualizar_icones(self):
+        """Ícones e capa na escala do monitor atual (também ao arrastar a janela para outro monitor)."""
+        cores = self.cores
+        escuro = tema.TEMAS.get(self._tema_atual(), {}).get("escuro", True)
         self.logo.setPixmap(pixmap("musica", cores["on_accent"], 15, espessura=2.4))
         self.btn_abrir.setIcon(icone("pasta", cores["text"]))
         self.btn_adicionar.setIcon(icone("arquivo+", cores["text"]))
+        self.btn_painel.setIcon(icone("painel", cores["muted"]))
         self.btn_desfazer.setIcon(icone("desfazer", cores["muted"]))
         self.btn_refazer.setIcon(icone("refazer", cores["muted"]))
         self.btn_config.setIcon(icone("config", cores["muted"]))
         self.btn_tema.setIcon(icone("sol" if escuro else "lua", cores["muted"]))
         self.btn_salvar_topo.setIcon(icone("salvar", cores["on_accent"], espessura=2))
         self.acao_busca.setIcon(icone("busca", cores["muted"]))
-
-        fonte_italico_base = QFont(fonte_ui_nome) if fonte_ui_nome else QFont()
-        fonte_italico_base.setPixelSize(tamanho)
-        self.modelo.definir_aparencia(cores, fonte_italico_base, self.fonte_mono)
-        self.tabela.definir_altura(tema.altura_linha(tamanho, c["densidade"]))
-        self.painel.definir_aparencia(cores)
+        self.painel.definir_aparencia(cores, tema.altura_botao(int(self.config["tamanho_fonte"])))
         self.tela_vazia.definir_aparencia(cores)
-        self.setWindowIcon(icone_app(cores["accent"], cores["on_accent"]))
-        barra_de_titulo_escura(self, escuro)
-        self.lbl_formato.setText(f"MP3 · ID3v2.{metadata.VERSAO_ID3}")
-        self._atualizar_migalha()
-        self._atualizar_estado()
+
+    def _fixar_largura_salvar(self):
+        """Largura mínima de "Salvar · 999": a barra não pula toda vez que o número muda."""
+        botao = self.btn_salvar_topo
+        texto = botao.text()
+        botao.setText("Salvar · 999")
+        botao.setMinimumWidth(0)
+        botao.ensurePolished()
+        botao.setMinimumWidth(botao.sizeHint().width())
+        botao.setText(texto)
+
+    def changeEvent(self, evento):
+        super().changeEvent(evento)
+        mudou_escala = getattr(QEvent, "DevicePixelRatioChange", None)
+        if mudou_escala is not None and evento.type() == mudou_escala and self.cores:
+            self._atualizar_icones()
+
+    def showEvent(self, evento):
+        super().showEvent(evento)
+        janela = self.windowHandle()
+        if janela is not None and not getattr(self, "_tela_conectada", False):
+            janela.screenChanged.connect(lambda _tela: self.cores and self._atualizar_icones())
+            self._tela_conectada = True
+            # sem isso o 1º botão da barra ganha o foco (e o anel de foco) ao abrir o programa
+            QTimer.singleShot(0, lambda: self.tabela.setFocus() if self.tabela.isVisible() else self.setFocus())
 
     def aplicar_config(self, config):
-        """Chamado ao vivo pela janela de configurações (e no Cancelar, com os valores antigos)."""
+        """Chamado ao vivo pela janela de configurações (e no Cancelar, com os valores antigos).
+        Espera ~150 ms sem mudanças antes de aplicar, para não reaplicar o tema a cada clique no spin."""
+        self._config_pendente = dict(config)
+        self._timer_config.start()
+
+    def _aplicar_config_pendente(self):
+        self._timer_config.stop()
+        if self._config_pendente is None:
+            return
         anterior = self.config
-        self.config = dict(config)
+        self.config = self._config_pendente
+        self._config_pendente = None
         metadata.VERSAO_ID3 = int(self.config["versao_id3"])
         self.lbl_formato.setText(f"MP3 · ID3v2.{metadata.VERSAO_ID3}")
         if any(anterior.get(k) != self.config.get(k) for k in CHAVES_APARENCIA):
             self.aplicar_tema()
         if anterior.get("generos") != self.config.get("generos"):
             self._atualizar_generos()
+        self.tela_vazia.definir_subpastas(self.config["subpastas"])
 
     def abrir_configuracoes(self):
         dialogo = DialogoConfiguracoes(self.config, self)
@@ -402,6 +556,7 @@ class JanelaPrincipal(QMainWindow):
         aceito = []
         dialogo.accepted.connect(lambda: aceito.append(True))
         dialogo.exec()
+        self._aplicar_config_pendente()
         if aceito:
             salvar_config(self.settings, self.config)
 
@@ -409,6 +564,12 @@ class JanelaPrincipal(QMainWindow):
         self.config["usar_escuro"] = not self.config["usar_escuro"]
         salvar_config(self.settings, self.config)
         self.aplicar_tema()
+
+    def alternar_painel(self):
+        visivel = self.painel.isHidden()
+        self.painel.setVisible(visivel)
+        self.btn_painel.setToolTip(("Esconder" if visivel else "Mostrar") + " o editor (Ctrl+E)")
+        self.settings.setValue("painel_visivel", visivel)
 
     def _atualizar_generos(self):
         dos_arquivos = {f.tags["genre"] for f in self.modelo.faixas if f.tags["genre"]}
@@ -753,14 +914,8 @@ class JanelaPrincipal(QMainWindow):
     def _atualizar_migalha(self):
         if not self.cores:
             return
-        seta = f'<span style="color:{self.cores["faint"]}">&nbsp;›&nbsp;</span>'
-        if self.pasta_atual:
-            partes = self.pasta_atual.parts[-3:]
-            texto = seta.join(partes[:-1] + (f'<span style="color:{self.cores["text"]}">{partes[-1]}</span>',))
-        else:
-            texto = "Arquivos avulsos"
-        self.lbl_migalha.setText(texto)
-        self.lbl_migalha.setToolTip(str(self.pasta_atual or ""))
+        partes = self.pasta_atual.parts if self.pasta_atual else ["Arquivos avulsos"]
+        self.lbl_migalha.definir(partes, self.cores, str(self.pasta_atual or ""))
 
     def _atualizar_estado(self):
         if not hasattr(self, "lbl_status") or not self.cores:
@@ -777,10 +932,10 @@ class JanelaPrincipal(QMainWindow):
         pendente = n_arquivos > 0
         if pendente:
             q = self.rascunho.quantidade_campos()
-            ponto = f'<span style="color:{self.cores["accent"]}">●</span>'
-            self.lbl_pendente.setText(
-                f"{ponto} {q} {'alteração' if q == 1 else 'alterações'} em "
-                f"{n_arquivos} {'arquivo' if n_arquivos == 1 else 'arquivos'} · não salvo")
+            ponto = f'<span style="color:{self.cores["accent"]}">●</span> '
+            self.lbl_pendente.definir(
+                f"{q} {'alteração' if q == 1 else 'alterações'} em "
+                f"{n_arquivos} {'arquivo' if n_arquivos == 1 else 'arquivos'} · não salvo", ponto)
         self.lbl_pendente.setVisible(pendente)
 
         self.btn_salvar_topo.setEnabled(pendente and not trabalhando)
@@ -798,7 +953,7 @@ class JanelaPrincipal(QMainWindow):
             simbolo = f'<span style="color:{self.cores.get("accent", "")}">✓</span> '
         elif erro:
             simbolo = f'<span style="color:{self.cores.get("erro", "")}">!</span> '
-        self.lbl_aviso.setText(simbolo + texto)
+        self.lbl_aviso.definir(texto, simbolo)
         self._timer_aviso.start()
 
     # ------------------------------------------------------------------ confirmações
@@ -842,6 +997,11 @@ class JanelaPrincipal(QMainWindow):
             valor = [valor]
         return list(valor or [])
 
+    def _esquecer_recente(self, pasta):
+        lista = [p for p in self._recentes() if p != str(pasta)]
+        self.settings.setValue("recentes", lista)
+        self.tela_vazia.definir_recentes(lista)
+
     def _lembrar_recente(self, pasta):
         lista = [str(pasta)] + [p for p in self._recentes() if p != str(pasta)]
         lista = lista[:MAX_RECENTES]
@@ -849,16 +1009,41 @@ class JanelaPrincipal(QMainWindow):
         self.tela_vazia.definir_recentes(lista)
 
     # ------------------------------------------------------------------ arrastar e soltar
+    @staticmethod
+    def _aceita_soltar(mime_data):
+        """Só pastas ou arquivos de áudio suportados (imagens, textos etc. não acendem nada)."""
+        if not mime_data.hasUrls():
+            return False
+        caminhos = [Path(u.toLocalFile()) for u in mime_data.urls() if u.isLocalFile()]
+        return any(c.is_dir() or formato(c) for c in caminhos)
+
+    def _destacar_soltar(self, ativo):
+        na_tela_vazia = self.telas.currentIndex() == 0
+        self.tela_vazia.destacar(ativo and na_tela_vazia)
+        if ativo and not na_tela_vazia:
+            self.overlay_drop.setGeometry(self.tabela.rect())
+            self.overlay_drop.raise_()
+            self.overlay_drop.show()
+        else:
+            self.overlay_drop.hide()
+
     def dragEnterEvent(self, evento):
-        if evento.mimeData().hasUrls():
+        if self._aceita_soltar(evento.mimeData()):
             evento.acceptProposedAction()
-            self.tela_vazia.destacar(True)
+            self._destacar_soltar(True)
+        else:
+            evento.ignore()
+
+    def dragMoveEvent(self, evento):
+        if self.overlay_drop.isVisible():
+            self.overlay_drop.setGeometry(self.tabela.rect())
+        super().dragMoveEvent(evento)
 
     def dragLeaveEvent(self, evento):
-        self.tela_vazia.destacar(False)
+        self._destacar_soltar(False)
 
     def dropEvent(self, evento):
-        self.tela_vazia.destacar(False)
+        self._destacar_soltar(False)
         caminhos = [url.toLocalFile() for url in evento.mimeData().urls() if url.isLocalFile()]
         if caminhos:
             evento.acceptProposedAction()
@@ -875,7 +1060,7 @@ class JanelaPrincipal(QMainWindow):
             return
         self.settings.setValue("geometria", self.saveGeometry())
         self.settings.setValue("divisor", self.divisor.saveState())
-        self.settings.setValue("cabecalho_v2", self.tabela.horizontalHeader().saveState())
+        self.settings.setValue("cabecalho_v2", self.tabela.estado_cabecalho())
         if self._carregador is not None:
             self._carregador.wait(3000)
         super().closeEvent(evento)
@@ -894,8 +1079,12 @@ def main():
     app.setApplicationVersion(VERSAO)
     app.setStyle("Fusion")
     tema.registrar_fontes()
+    filtro_janelas = FiltroJanelas(app)
+    app.installEventFilter(filtro_janelas)
 
     janela = JanelaPrincipal()
+    janela.filtro_janelas = filtro_janelas
+    filtro_janelas.aplicar_em_todas(tema.TEMAS.get(janela._tema_atual(), {}).get("escuro", True))
     janela.show()
 
     # arquivos/pastas passados na linha de comando (ou arrastados sobre o .exe)

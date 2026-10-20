@@ -6,7 +6,7 @@ edição direto na célula (vira alteração pendente) e desenho das colunas esp
 from PySide6.QtCore import (
     QAbstractTableModel, QItemSelection, QItemSelectionModel, QModelIndex, QRectF, QSortFilterProxyModel, Qt, Signal,
 )
-from PySide6.QtGui import QAction, QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QAction, QColor, QCursor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView, QHeaderView, QMenu, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableView,
 )
@@ -41,6 +41,10 @@ COLUNAS_SECUNDARIAS = {"tracknumber", "discnumber", "album", "date", "genre", "d
                        "composer", "lyricist", "comment"}
 COLUNAS_DIREITA = {"duracao", "bitrate"}
 EDITAVEIS = set(CAMPOS)                        # colunas que são tags podem ser editadas na célula
+LARGURA_MIN_TITULO = 160
+# quando a tabela fica estreita, essas colunas somem sozinhas (na ordem) até o Título caber
+ORDEM_ESCONDER = ["comment", "lyricist", "composer", "pasta", "arquivo", "bitrate", "discnumber",
+                  "albumartist", "genre", "date", "capa", "duracao", "album", "tracknumber"]
 
 PAPEL_ORDEM = Qt.UserRole          # valor usado para ordenar a coluna
 PAPEL_FAIXA = Qt.UserRole + 1      # o objeto Faixa da linha
@@ -263,18 +267,33 @@ class FiltroFaixas(QSortFilterProxyModel):
 
 
 class DelegadoTabela(QStyledItemDelegate):
-    """Tira o retângulo de foco e desenha as colunas Capa (quadradinho) e estado (ponto)."""
+    """Tira o retângulo de foco, pinta o hover da linha inteira e o fundo das células alteradas,
+    e desenha as colunas Capa (quadradinho) e estado (ponto)."""
 
     def __init__(self, modelo, parent=None):
         super().__init__(parent)
         self.modelo = modelo
+        self.linha_hover = -1          # linha (da tela) sob o mouse
 
     def initStyleOption(self, opcao, indice):
         super().initStyleOption(opcao, indice)
-        opcao.state &= ~QStyle.State_HasFocus
+        opcao.state &= ~(QStyle.State_HasFocus | QStyle.State_MouseOver)
+
+    def _pintar_fundo(self, pintor, opcao, indice, chave):
+        cores = self.modelo.cores
+        if not cores or opcao.state & QStyle.State_Selected:
+            return
+        if indice.row() == self.linha_hover:
+            pintor.fillRect(opcao.rect, QColor(cores["hover"]))
+        faixa = indice.data(PAPEL_FAIXA)
+        if chave in EDITAVEIS and faixa is not None and self.modelo.rascunho.tem_campo(faixa.caminho, chave):
+            tinta = QColor(cores["accent"])
+            tinta.setAlpha(26)
+            pintor.fillRect(opcao.rect, tinta)
 
     def paint(self, pintor, opcao, indice):
         chave = CHAVES[indice.column()]
+        self._pintar_fundo(pintor, opcao, indice, chave)
         if chave not in ("capa", "estado"):
             super().paint(pintor, opcao, indice)
             return
@@ -323,7 +342,9 @@ class TabelaFaixas(QTableView):
         super().__init__(parent)
         filtro.setSourceModel(modelo)
         self.setModel(filtro)
-        self.setItemDelegate(DelegadoTabela(modelo, self))
+        self.delegado = DelegadoTabela(modelo, self)
+        self.setItemDelegate(self.delegado)
+        self._auto_escondidas = set()      # colunas escondidas só por falta de espaço
 
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -351,7 +372,7 @@ class TabelaFaixas(QTableView):
         cabecalho.setContextMenuPolicy(Qt.CustomContextMenu)
         cabecalho.customContextMenuRequested.connect(self._menu_colunas)
         self.colunas_padrao()
-        self.definir_altura(34)
+        self.definir_altura(34, 32)
 
         # começa na ordem em que os arquivos foram carregados (sem coluna ordenada)
         cabecalho.setSortIndicator(-1, Qt.AscendingOrder)
@@ -359,6 +380,7 @@ class TabelaFaixas(QTableView):
 
     # ----- colunas -----
     def colunas_padrao(self):
+        self._auto_escondidas.clear()
         cabecalho = self.horizontalHeader()
         for coluna, (chave, _titulo, largura, visivel) in enumerate(COLUNAS):
             visual = cabecalho.visualIndex(coluna)
@@ -371,6 +393,7 @@ class TabelaFaixas(QTableView):
                     coluna, QHeaderView.Fixed if chave in ("capa", "estado") else QHeaderView.Interactive)
                 self.setColumnWidth(coluna, largura)
             cabecalho.setSectionHidden(coluna, not visivel)
+        self._ajustar_colunas()
 
     def _menu_colunas(self, pos):
         cabecalho = self.horizontalHeader()
@@ -378,16 +401,96 @@ class TabelaFaixas(QTableView):
         for coluna, (chave, titulo, _largura, _visivel) in enumerate(COLUNAS):
             if chave in COLUNAS_FIXAS:
                 continue
-            acao = QAction(titulo, menu, checkable=True, checked=not cabecalho.isSectionHidden(coluna))
-            acao.toggled.connect(lambda on, c=coluna: cabecalho.setSectionHidden(c, not on))
+            visivel = not cabecalho.isSectionHidden(coluna) or coluna in self._auto_escondidas
+            acao = QAction(titulo, menu, checkable=True, checked=visivel)
+            acao.toggled.connect(lambda on, c=coluna: self._mostrar_coluna(c, on))
             menu.addAction(acao)
+        if self._auto_escondidas:
+            menu.addSeparator()
+            nomes = ", ".join(TITULOS[CHAVES[c]] for c in sorted(self._auto_escondidas))
+            aviso = menu.addAction(f"Sem espaço agora: {nomes}")
+            aviso.setEnabled(False)
         menu.addSeparator()
         menu.addAction("Restaurar colunas padrão", self.colunas_padrao)
         menu.exec(cabecalho.mapToGlobal(pos))
 
-    def definir_altura(self, altura):
-        self.verticalHeader().setDefaultSectionSize(altura)
-        self.horizontalHeader().setFixedHeight(altura)
+    def _mostrar_coluna(self, coluna, visivel):
+        self._auto_escondidas.discard(coluna)
+        self.horizontalHeader().setSectionHidden(coluna, not visivel)
+        self._ajustar_colunas()
+
+    def _ajustar_colunas(self):
+        """Esconde colunas secundárias enquanto o Título ficaria estreito demais (e as mostra de volta)."""
+        cabecalho = self.horizontalHeader()
+        for coluna in self._auto_escondidas:
+            cabecalho.setSectionHidden(coluna, False)
+        self._auto_escondidas.clear()
+        titulo = CHAVES.index("title")
+
+        def ocupado():
+            return sum(cabecalho.sectionSize(c) for c in range(len(COLUNAS))
+                       if c != titulo and not cabecalho.isSectionHidden(c))
+
+        disponivel = self.viewport().width()
+        for chave in ORDEM_ESCONDER:
+            if disponivel - ocupado() >= LARGURA_MIN_TITULO:
+                break
+            coluna = CHAVES.index(chave)
+            if not cabecalho.isSectionHidden(coluna):
+                cabecalho.setSectionHidden(coluna, True)
+                self._auto_escondidas.add(coluna)
+
+    def estado_cabecalho(self):
+        """Estado para salvar, sem as colunas que só estão escondidas por falta de espaço."""
+        cabecalho = self.horizontalHeader()
+        for coluna in self._auto_escondidas:
+            cabecalho.setSectionHidden(coluna, False)
+        estado = cabecalho.saveState()
+        for coluna in self._auto_escondidas:
+            cabecalho.setSectionHidden(coluna, True)
+        return estado
+
+    def restaurar_cabecalho(self, estado):
+        self._auto_escondidas.clear()
+        self.horizontalHeader().restoreState(estado)
+        self._ajustar_colunas()
+
+    def resizeEvent(self, evento):
+        super().resizeEvent(evento)
+        self._ajustar_colunas()
+
+    def definir_altura(self, altura_linha, altura_cabecalho):
+        self.verticalHeader().setDefaultSectionSize(altura_linha)
+        self.horizontalHeader().setFixedHeight(altura_cabecalho)
+
+    # ----- hover da linha inteira -----
+    def _definir_hover(self, linha):
+        anterior = self.delegado.linha_hover
+        if linha == anterior:
+            return
+        self.delegado.linha_hover = linha
+        largura = self.viewport().width()
+        for l in (anterior, linha):
+            if l >= 0:
+                self.viewport().update(0, self.rowViewportPosition(l), largura, self.rowHeight(l))
+
+    def _hover_pelo_cursor(self):
+        pos = self.viewport().mapFromGlobal(QCursor.pos())
+        dentro = self.viewport().rect().contains(pos)
+        self._definir_hover(self.rowAt(pos.y()) if dentro else -1)
+
+    def mouseMoveEvent(self, evento):
+        super().mouseMoveEvent(evento)
+        self._definir_hover(self.rowAt(evento.position().toPoint().y()))
+
+    def leaveEvent(self, evento):
+        super().leaveEvent(evento)
+        self._definir_hover(-1)
+
+    def scrollContentsBy(self, dx, dy):
+        super().scrollContentsBy(dx, dy)
+        if dy:
+            self._hover_pelo_cursor()
 
     # ----- seleção -----
     def linhas_selecionadas(self):

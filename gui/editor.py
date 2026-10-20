@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from metadata import ler_capa, rotulo, validar_valor
 from gui.icones import icone, pixmap
+from gui.rotulo import RotuloElidido, quebravel
 from gui.tema import repolir
 
 CAMPOS_LARGOS_1 = ["title", "artist", "album", "albumartist"]
@@ -29,6 +30,7 @@ CAMPOS_MONO = {"tracknumber", "discnumber", "date"}
 
 TEXTO_VARIOS = "‹vários valores›"
 LADO_CAPA = 112
+BORDA_CAPA = 2                  # a mesma espessura com e sem arrastar, para a imagem não "pular"
 LIMITE_COMPARAR_CAPAS = 150     # acima disso não compara as capas uma a uma
 EXTENSOES_IMAGEM = (".jpg", ".jpeg", ".png")
 
@@ -160,6 +162,7 @@ class PainelEditor(QWidget):
         self._capas_disco = {}     # cache: caminho -> (dados, mime) | None
         self._capa_mostrada = None # (dados, mime) da capa em exibição, se houver
         self.campos = {}           # campo -> (widget, rótulo)
+        self._erros = {}           # campo -> rótulo da mensagem de erro (abaixo do campo)
         self._modelo_generos = QStringListModel(self)
 
         self.pilha = QStackedWidget()
@@ -201,9 +204,10 @@ class PainelEditor(QWidget):
         vt = QVBoxLayout(topo)
         vt.setContentsMargins(20, 16, 20, 12)
         vt.setSpacing(3)
-        self.lbl_titulo = QLabel(objectName="tituloPainel")
+        self.lbl_titulo = RotuloElidido(objectName="tituloPainel")
         self.lbl_sub = _rotulo("", "sub")
         self.lbl_sub.setWordWrap(True)
+        self.lbl_sub.setMinimumWidth(0)
         vt.addWidget(self.lbl_titulo)
         vt.addWidget(self.lbl_sub)
         v.addWidget(topo)
@@ -282,7 +286,7 @@ class PainelEditor(QWidget):
         self.btn_trocar_capa.clicked.connect(self._escolher_capa)
         self.btn_mais_capa = QPushButton()
         self.btn_mais_capa.setProperty("tipo", "fantasma")
-        self.btn_mais_capa.setFixedWidth(34)
+        self.btn_mais_capa.setFixedSize(32, 32)
         self.btn_mais_capa.setToolTip("Mais opções da capa")
         self.btn_mais_capa.setAccessibleName("Mais opções da capa")
         self.btn_mais_capa.clicked.connect(
@@ -320,16 +324,23 @@ class PainelEditor(QWidget):
                 completar.popup().setObjectName("popupCompletar")
                 widget.setCompleter(completar)
         lbl.setBuddy(widget)
+        erro = _rotulo("", "erroCampo")
+        erro.setWordWrap(True)
+        erro.setVisible(False)
         v.addWidget(lbl)
         v.addWidget(widget)
+        v.addWidget(erro)
         self.campos[campo] = (widget, lbl)
+        self._erros[campo] = erro
         return caixa
 
     # ------------------------------------------------------------------ aparência
-    def definir_aparencia(self, cores):
+    def definir_aparencia(self, cores, altura_botao=32):
+        """Também chamado quando a janela muda para um monitor com outra escala (refaz ícones e capa)."""
         self.cores = cores
         self.icone_vazio.setPixmap(pixmap("musica", cores["muted"], 28, espessura=1.5))
         self.btn_mais_capa.setIcon(icone("mais", cores["muted"]))
+        self.btn_mais_capa.setFixedSize(altura_botao, altura_botao)
         for campo in self.campos:
             self._atualizar_rotulo(campo)
         self._mostrar_capa()
@@ -369,11 +380,12 @@ class PainelEditor(QWidget):
         n = len(self._faixas)
         if n == 1:
             f = self._faixas[0]
-            self.lbl_titulo.setText(self.rascunho.valor(f, "title") or f.nome)
-            self.lbl_sub.setText(f"{f.nome} · {f.duracao_formatada} · {f.bitrate} kbps")
+            self.lbl_titulo.definir(self.rascunho.valor(f, "title") or f.nome)
+            bitrate = f"{f.bitrate} kbps" if f.bitrate else "—"
+            self.lbl_sub.setText(f"{quebravel(f.nome)} · {f.duracao_formatada} · {bitrate}")
             self.lbl_sub.setToolTip(str(f.caminho))
         else:
-            self.lbl_titulo.setText(f"{n} arquivos selecionados")
+            self.lbl_titulo.definir(f"{n} arquivos selecionados")
             self.lbl_sub.setText("Campos diferentes aparecem como ‹vários valores› e só mudam se você editar.")
             self.lbl_sub.setToolTip("")
 
@@ -427,7 +439,8 @@ class PainelEditor(QWidget):
                     texto = "‹várias capas›"
 
         self._capa_mostrada = capa
-        imagem = _capa_arredondada(capa[0], LADO_CAPA, self.devicePixelRatioF()) if capa else None
+        lado = LADO_CAPA - 2 * BORDA_CAPA
+        imagem = _capa_arredondada(capa[0], lado, self.devicePixelRatioF(), raio=8) if capa else None
         if imagem is not None:
             self.quadro_capa.setText("")
             self.quadro_capa.setPixmap(imagem)
@@ -528,16 +541,21 @@ class PainelEditor(QWidget):
         self._validar_campo(campo, texto)
         self._atualizar_rotulo(campo)
         if campo == "title" and len(self._faixas) == 1:
-            self.lbl_titulo.setText(texto or self._faixas[0].nome)
+            self.lbl_titulo.definir(texto or self._faixas[0].nome)
         self.atualizar_rodape()
         self.alterado.emit()
 
     def _validar_campo(self, campo, texto):
-        """Borda vermelha na hora em que o valor fica inválido (ex.: ano com 2 dígitos)."""
+        """Borda vermelha + mensagem abaixo do campo na hora em que o valor fica inválido (ex.: ano com 2 dígitos)."""
         ok, mensagem = validar_valor(campo, texto)
+        self._mostrar_erro(campo, None if ok else mensagem)
+
+    def _mostrar_erro(self, campo, mensagem):
         widget = self.campos[campo][0]
-        erro = not ok
-        widget.setToolTip(mensagem if erro else "")
+        erro = bool(mensagem)
+        widget.setToolTip(mensagem or "")
+        self._erros[campo].setText(mensagem or "")
+        self._erros[campo].setVisible(erro)
         if bool(widget.property("erro")) != erro:
             widget.setProperty("erro", erro)
             repolir(widget)
@@ -580,9 +598,8 @@ class PainelEditor(QWidget):
         primeiro = None
         for campo in campos:
             if campo in self.campos:
-                widget = self.campos[campo][0]
-                widget.setProperty("erro", True)
-                repolir(widget)
+                ok, mensagem = validar_valor(campo, self._texto(campo))
+                self._mostrar_erro(campo, "Valor inválido" if ok else mensagem)
                 primeiro = primeiro or campo
         if primeiro:
             self.campos[primeiro][0].setFocus()

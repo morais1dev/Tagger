@@ -3,13 +3,14 @@
 from copy import deepcopy
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel,
     QPlainTextEdit, QPushButton, QRadioButton, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from gui.config import DENSIDADES, PADROES
+from gui.icones import circulo
 from gui.tema import ACENTOS, familias_instaladas, temas_claros, temas_escuros
 
 AUTOMATICA = "Automática"
@@ -84,6 +85,7 @@ class DialogoConfiguracoes(QDialog):
         self.grupo_modo.addButton(self.rb_claro)
         self.rb_escuro.toggled.connect(lambda on: self._definir("usar_escuro", on))
         modo = QHBoxLayout()
+        modo.setSpacing(20)
         modo.addWidget(self.rb_escuro)
         modo.addWidget(self.rb_claro)
         modo.addStretch()
@@ -169,7 +171,7 @@ class DialogoConfiguracoes(QDialog):
             v.addWidget(item)
         v.addSpacing(8)
         v.addWidget(_rotulo(
-            "Alterações ficam pendentes (com o ponto verde) até você clicar em Salvar, inclusive "
+            "Alterações ficam pendentes (marcadas com um ponto colorido) até você clicar em Salvar, inclusive "
             "as feitas por Desfazer, Numerar faixas, Colar tags e edição direto na tabela.", "ajuda"))
         v.addStretch()
         return w
@@ -226,13 +228,13 @@ class DialogoConfiguracoes(QDialog):
         atual = QColor(self.config["acento"]).name()
         for cor, botao in self.amostras.items():
             borda = "palette(window-text)" if cor == atual else "transparent"
-            botao.setStyleSheet(f"background: {cor}; border: 2px solid {borda};")
+            botao.setStyleSheet(
+                f"QPushButton {{ background: {cor}; border: 2px solid {borda}; }}"
+                f"QPushButton:focus {{ border: 2px dotted palette(window-text); }}")
         personalizada = atual not in self.amostras
-        self.btn_cor_livre.setText("Personalizada ●" if personalizada else "Personalizada…")
-        if personalizada:
-            self.btn_cor_livre.setStyleSheet(f"color: {atual};")
-        else:
-            self.btn_cor_livre.setStyleSheet("")
+        # a cor aparece numa bolinha ao lado: texto colorido ficaria ilegível com cores muito claras/escuras
+        self.btn_cor_livre.setText("Personalizada" if personalizada else "Personalizada…")
+        self.btn_cor_livre.setIcon(circulo(atual) if personalizada else QIcon())
 
     def _definir(self, chave, valor):
         if self._preenchendo or self.config.get(chave) == valor:
