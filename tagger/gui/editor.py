@@ -13,19 +13,19 @@ from pathlib import Path
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRectF, QStringListModel, Qt, Signal
 from PySide6.QtGui import QImage, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QCompleter, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QApplication, QCompleter, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
     QPlainTextEdit, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from metadata import ler_capa, rotulo, validar_valor
-from gui.icones import icone, pixmap
-from gui.rotulo import RotuloElidido, quebravel
-from gui.tema import repolir
+from tagger.nucleo.metadata import ler_capa, rotulo, validar_valor
+from tagger.gui.icones import icone, pixmap
+from tagger.gui.rotulo import RotuloElidido, quebravel
+from tagger.gui.tema import repolir
 
 CAMPOS_LARGOS_1 = ["title", "artist", "album", "albumartist"]
 CAMPOS_PARES = ["tracknumber", "discnumber", "date", "genre"]
 CAMPOS_LARGOS_2 = ["composer", "lyricist"]
-CAMPO_MULTILINHA = "comment"
+CAMPOS_MULTILINHA = {"comment": 76, "lyrics": 160}     # campo -> altura
 CAMPOS_MONO = {"tracknumber", "discnumber", "date"}
 
 TEXTO_VARIOS = "‹vários valores›"
@@ -33,6 +33,7 @@ LADO_CAPA = 112
 BORDA_CAPA = 2                  # a mesma espessura com e sem arrastar, para a imagem não "pular"
 LIMITE_COMPARAR_CAPAS = 150     # acima disso não compara as capas uma a uma
 EXTENSOES_IMAGEM = (".jpg", ".jpeg", ".png")
+LIMITE_BYTES_CAPA = 500 * 1024   # acima disso a capa é recomprimida (se a otimização estiver ligada)
 
 
 # ---------------------------------------------------------------------------- imagens
@@ -70,6 +71,32 @@ def imagem_do_mime(mime_data):
         if not imagem.isNull():
             return imagem_para_bytes(imagem)
     return None
+
+
+def otimizar_imagem(dados, mime, lado_max):
+    """
+    Capa grande (lado > lado_max ou > 500 KB) vira JPEG de no máximo lado_max px.
+    Devolve (dados, mime), os originais se a imagem já é pequena ou não dá para melhorar.
+    """
+    imagem = QImage.fromData(dados)
+    if not lado_max or imagem.isNull():
+        return dados, mime
+    grande = max(imagem.width(), imagem.height()) > lado_max
+    if not grande and len(dados) <= LIMITE_BYTES_CAPA:
+        return dados, mime
+    if grande:
+        imagem = imagem.scaled(lado_max, lado_max, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    if imagem.hasAlphaChannel():           # JPEG não tem transparência: fundo branco
+        fundo = QImage(imagem.size(), QImage.Format_RGB32)
+        fundo.fill(Qt.white)
+        pintor = QPainter(fundo)
+        pintor.drawImage(0, 0, imagem)
+        pintor.end()
+        imagem = fundo
+    novos, novo_mime = imagem_para_bytes(imagem.convertToFormat(QImage.Format_RGB32))
+    if not grande and len(novos) >= len(dados):
+        return dados, mime
+    return novos, novo_mime
 
 
 def _capa_arredondada(dados, lado, dpr, raio=10):
@@ -161,6 +188,7 @@ class PainelEditor(QWidget):
         self._editando = False     # True enquanto o próprio painel mexe no rascunho
         self._capas_disco = {}     # cache: caminho -> (dados, mime) | None
         self._capa_mostrada = None # (dados, mime) da capa em exibição, se houver
+        self.lado_max_capa = 0     # 0 = não reduz capas grandes ao inserir
         self.campos = {}           # campo -> (widget, rótulo)
         self._erros = {}           # campo -> rótulo da mensagem de erro (abaixo do campo)
         self._modelo_generos = QStringListModel(self)
@@ -230,7 +258,8 @@ class PainelEditor(QWidget):
         vc.addLayout(grade)
         for campo in CAMPOS_LARGOS_2:
             vc.addWidget(self._criar_campo(campo))
-        vc.addWidget(self._criar_campo(CAMPO_MULTILINHA, multilinha=True))
+        for campo in CAMPOS_MULTILINHA:
+            vc.addWidget(self._criar_campo(campo, multilinha=True))
         vc.addStretch()
 
         rolagem = QScrollArea()
@@ -308,7 +337,7 @@ class PainelEditor(QWidget):
 
         if multilinha:
             widget = QPlainTextEdit()
-            widget.setFixedHeight(76)
+            widget.setFixedHeight(CAMPOS_MULTILINHA[campo])
             widget.setTabChangesFocus(True)
             widget.textChanged.connect(lambda c=campo: self._ao_editar(c))
         else:
@@ -460,6 +489,13 @@ class PainelEditor(QWidget):
     def _definir_capa(self, acao):
         if not self._faixas:
             return
+        if acao and acao[0] == "definir":
+            dados, mime = otimizar_imagem(acao[1], acao[2], self.lado_max_capa)
+            if len(dados) != len(acao[1]):
+                antes, depois = QImage.fromData(acao[1]), QImage.fromData(dados)
+                self.aviso.emit(f"Capa reduzida: {antes.width()}×{antes.height()}, {round(len(acao[1]) / 1024)} KB "
+                                f"→ {depois.width()}×{depois.height()}, {round(len(dados) / 1024)} KB")
+            acao = ("definir", dados, mime)
         self._editando = True
         try:
             self.rascunho.definir_capa([f.caminho for f in self._faixas], acao)
@@ -501,6 +537,33 @@ class PainelEditor(QWidget):
             Path(destino).write_bytes(dados)
             self.aviso.emit(f"Capa exportada para {Path(destino).name}")
 
+    def _salvar_cover_na_pasta(self):
+        """Grava a capa mostrada como cover.jpg (ou .png) na pasta de cada arquivo selecionado."""
+        if not self._capa_mostrada:
+            return
+        dados, mime = self._capa_mostrada
+        nome = "cover.png" if mime == "image/png" else "cover.jpg"
+        pastas = sorted({f.caminho.parent for f in self._faixas})
+        existentes = [p for p in pastas if (p / nome).exists()]
+        if existentes:
+            resposta = QMessageBox.question(
+                self, "Substituir capa da pasta?",
+                f"Já existe um {nome} em {len(existentes)} pasta(s). Substituir?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if resposta != QMessageBox.Yes:
+                return
+        falhas = []
+        for pasta in pastas:
+            try:
+                (pasta / nome).write_bytes(dados)
+            except OSError:
+                falhas.append(pasta)
+        if falhas:
+            self.aviso.emit(f"Não consegui gravar {nome} em {len(falhas)} pasta(s).")
+        else:
+            onde = pastas[0].name if len(pastas) == 1 else f"{len(pastas)} pastas"
+            self.aviso.emit(f"{nome} salvo em {onde}")
+
     def _menu_capa(self, posicao_global):
         if not self._faixas:
             return
@@ -511,6 +574,8 @@ class PainelEditor(QWidget):
         acao_colar.setEnabled(imagem_do_mime(dados_area) is not None)
         acao_exportar = menu.addAction("Exportar capa…", self._exportar_capa)
         acao_exportar.setEnabled(self._capa_mostrada is not None)
+        acao_cover = menu.addAction("Salvar como cover.jpg na pasta", self._salvar_cover_na_pasta)
+        acao_cover.setEnabled(self._capa_mostrada is not None)
         menu.addSeparator()
         tem_alguma = any(self._capa_efetiva(f) is not None for f in self._faixas[:LIMITE_COMPARAR_CAPAS]) \
             or any(f.tem_capa for f in self._faixas)

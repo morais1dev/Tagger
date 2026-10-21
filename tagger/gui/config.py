@@ -16,6 +16,15 @@ PADROES = {
     "numerar_com_total": True,
     # tags
     "versao_id3": 3,
+    "multivalor": True,          # "A; B" vira vários valores ao salvar (artista, gênero...)
+    "remover_id3v1": False,
+    "otimizar_capa": True,       # capas grandes viram JPEG de no máximo lado_max_capa px
+    "lado_max_capa": 1000,
+    # padrões (renomear pelas tags / tags pelo nome)
+    "padrao_renomear": "{tracknumber:02} - {artist} - {title}",
+    "padrao_tags": "%artist% - %title%",
+    "recentes_renomear": [],
+    "recentes_tags": [],
     "generos": [
         "Alternative", "Ambient", "Axé", "Blues", "Bossa Nova", "Classical", "Country", "Dance",
         "Disco", "Drum & Bass", "Electronic", "Folk", "Forró", "Funk", "Gospel", "Hard Rock",

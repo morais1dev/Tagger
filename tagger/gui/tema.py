@@ -142,11 +142,10 @@ ACENTOS = [
 ]
 
 # Fontes preferidas, na ordem, quando a configuração está em "Automática".
-# Dica: coloque Geist-*.ttf e GeistMono-*.ttf em gui/fontes/ para usar a fonte do mockup.
 FONTES_UI = ["Geist", "Segoe UI Variable Text", "Segoe UI", "SF Pro Text", "Helvetica Neue", "Noto Sans", "DejaVu Sans"]
 FONTES_MONO = ["Geist Mono", "Cascadia Mono", "Consolas", "SF Mono", "Menlo", "DejaVu Sans Mono"]
 
-PASTA_FONTES = Path(__file__).parent / "fontes"
+PASTA_FONTES = Path(__file__).parent / "recursos" / "fontes"
 
 ALTURA_LINHA = {"compacta": 21, "confortavel": 29, "espacosa": 37}   # somado ao tamanho da fonte
 
@@ -220,7 +219,6 @@ def temas_claros():
 
 # ---------------------------------------------------------------------------- fontes
 def registrar_fontes():
-    """Registra fontes da pasta gui/fontes (se existir)."""
     if PASTA_FONTES.is_dir():
         for arquivo in PASTA_FONTES.iterdir():
             if arquivo.suffix.lower() in (".ttf", ".otf"):
@@ -357,6 +355,7 @@ QTabBar::tab:selected { color: $text; border-bottom: 2px solid $accent; }
 QTabBar::tab:hover { color: $text; }
 QLabel[papel="secao"] { font-weight: 600; font-size: ${fs}px; }
 QLabel[papel="ajuda"] { color: $muted; font-size: ${fs_s}px; }
+QLabel[papel="erroCampo"] { color: $erro; font-size: ${fs_s}px; }
 
 /* ---------- Barra de status ---------- */
 QStatusBar { background: $surface; border-top: 1px solid $line; min-height: 28px; }

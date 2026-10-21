@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QHeaderView, QMenu, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableView,
 )
 
-from metadata import CAMPOS
+from tagger.nucleo.metadata import CAMPOS
 
 # (chave, título, largura inicial ou None = estica, visível por padrão)
 COLUNAS = [
@@ -26,6 +26,7 @@ COLUNAS = [
     ("composer",    "Compositor",       150,  False),
     ("lyricist",    "Letrista",         150,  False),
     ("comment",     "Comentário",       200,  False),
+    ("lyrics",      "Letra",            200,  False),
     ("duracao",     "Duração",          76,   True),
     ("bitrate",     "Bitrate",          84,   False),
     ("arquivo",     "Arquivo",          220,  False),
@@ -38,12 +39,13 @@ TITULOS = {c[0]: c[1] for c in COLUNAS}
 COLUNAS_FIXAS = {"title", "estado"}            # não podem ser escondidas
 COLUNAS_MONO = {"tracknumber", "discnumber", "date", "duracao", "bitrate"}
 COLUNAS_SECUNDARIAS = {"tracknumber", "discnumber", "album", "date", "genre", "duracao", "bitrate", "pasta",
-                       "composer", "lyricist", "comment"}
+                       "composer", "lyricist", "comment", "lyrics"}
 COLUNAS_DIREITA = {"duracao", "bitrate"}
 EDITAVEIS = set(CAMPOS)                        # colunas que são tags podem ser editadas na célula
+CAMPOS_TEXTO_LONGO = {"comment", "lyrics"}     # a célula mostra só a 1ª linha
 LARGURA_MIN_TITULO = 160
 # quando a tabela fica estreita, essas colunas somem sozinhas (na ordem) até o Título caber
-ORDEM_ESCONDER = ["comment", "lyricist", "composer", "pasta", "arquivo", "bitrate", "discnumber",
+ORDEM_ESCONDER = ["lyrics", "comment", "lyricist", "composer", "pasta", "arquivo", "bitrate", "discnumber",
                   "albumartist", "genre", "date", "capa", "duracao", "album", "tracknumber"]
 
 PAPEL_ORDEM = Qt.UserRole          # valor usado para ordenar a coluna
@@ -102,6 +104,15 @@ class ModeloFaixas(QAbstractTableModel):
                 self.faixas[linha] = nova
                 self.dataChanged.emit(self.index(linha, 0), self.index(linha, len(COLUNAS) - 1))
 
+    def renomear(self, mapa):
+        """Arquivos renomeados no disco ({antigo: novo}): a mesma Faixa passa a apontar para o caminho novo."""
+        for linha, faixa in enumerate(self.faixas):
+            novo = mapa.get(faixa.caminho)
+            if novo is not None:
+                faixa.caminho = novo
+                self.dataChanged.emit(self.index(linha, 0), self.index(linha, len(COLUNAS) - 1))
+        self._reindexar()
+
     def linhas_mudaram(self, caminhos):
         """Avisa a tabela que essas linhas mudaram (ex.: rascunho alterado)."""
         for caminho in caminhos:
@@ -136,7 +147,8 @@ class ModeloFaixas(QAbstractTableModel):
 
     def flags(self, indice):
         base = super().flags(indice)
-        if indice.isValid() and CHAVES[indice.column()] in EDITAVEIS:
+        chave = CHAVES[indice.column()] if indice.isValid() else None
+        if chave in EDITAVEIS and chave != "lyrics":      # letra: várias linhas, só no painel
             base |= Qt.ItemIsEditable
         return base
 
@@ -178,7 +190,7 @@ class ModeloFaixas(QAbstractTableModel):
                 return valor.split("/")[0] or "—"
             if chave == "title":
                 return valor or faixa.nome
-            if chave == "comment":
+            if chave in CAMPOS_TEXTO_LONGO:
                 return valor.splitlines()[0] if valor else "—"
             return valor or "—"
 
@@ -226,7 +238,7 @@ class ModeloFaixas(QAbstractTableModel):
         if papel == Qt.ToolTipRole:
             if chave in ("title", "arquivo", "pasta"):
                 return str(faixa.caminho)
-            if chave == "comment":
+            if chave in CAMPOS_TEXTO_LONGO:
                 return self._valor(faixa, chave) or None
             if chave == "capa":
                 return "Tem capa" if faixa.tem_capa else "Sem capa"

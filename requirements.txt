@@ -1,2 +1,2 @@
 mutagen==1.48.1
-PySide6>=6.6
+PySide6-Essentials==6.12.0

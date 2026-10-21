@@ -1,0 +1,48 @@
+# Ao criar uma tag de versão (ex.: git tag v2.0.0 && git push origin v2.0.0):
+# roda os testes, gera o Tagger.exe com o PyInstaller e anexa o .exe na Release do GitHub.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Instalar dependências
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Conferir se a tag bate com a versão do código
+        shell: bash
+        run: |
+          versao=$(python -c "from tagger import __version__; print(__version__)")
+          if [ "v$versao" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::A tag $GITHUB_REF_NAME não bate com tagger/__init__.py ($versao)"
+            exit 1
+          fi
+
+      - name: Testes
+        run: python -m pytest -q
+
+      - name: Gerar o executável
+        run: pyinstaller tagger.spec --noconfirm
+
+      - name: Publicar na Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Tagger.exe
+          generate_release_notes: true

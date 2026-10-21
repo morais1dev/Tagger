@@ -1,10 +1,28 @@
+"""
+Tagger — versão de linha de comando.
+
+Executar:  python -m tagger.cli
+"""
+
 import os, subprocess
 from pathlib import Path
-from metadata import CAMPOS, CAMPOS_BULK, carregar, salvar, salvar_varios, validar_valor, rotulo
-from interface import selecionar_arquivo
+from tagger.nucleo.metadata import CAMPOS, CAMPOS_BULK, carregar, salvar, salvar_varios, validar_valor, rotulo
+from tagger import __version__
 
 # Na CLI os campos são escolhidos por número: 1 = primeiro campo de CAMPOS, etc.
 LISTA_CAMPOS = list(CAMPOS)
+
+
+def selecionar_arquivo():
+    """Janela nativa de seleção de arquivos (Tkinter só é carregado aqui, a GUI não depende dele)."""
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    arquivos = filedialog.askopenfilenames(title="Selecione os arquivos", filetypes=[("Arquivos MP3", "*.mp3")])
+    root.destroy()
+    return arquivos
 
 
 def limpar_tela():
@@ -219,7 +237,7 @@ def modo_bulk():
 
 def mostrar_menu():
     limpar_tela()
-    print("\n=== Tagger ===")
+    print(f"\n=== Tagger {__version__} (CLI) ===")
     print("1 - Edição individual")
     print("2 - Bulk edit")
     print("0 - Sair")
@@ -228,7 +246,7 @@ def mostrar_menu():
 def main():
 
     if os.name == "nt":
-        subprocess.run('title Tagger v1.0', shell=True)
+        subprocess.run(f'title Tagger {__version__} (CLI)', shell=True)
 
     while True:
         mostrar_menu()

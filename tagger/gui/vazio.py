@@ -5,9 +5,9 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
-from gui.icones import icone, pixmap
-from gui.rotulo import RotuloElidido
-from gui.tema import repolir
+from tagger.gui.icones import icone, pixmap
+from tagger.gui.rotulo import RotuloElidido
+from tagger.gui.tema import repolir
 
 
 class LinhaRecente(QFrame):

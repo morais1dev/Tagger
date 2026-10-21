@@ -8,3 +8,19 @@
 venv/
 ENV/
 env/
+# Build / testes
+build/
+dist/
+.pytest_cache/
+*.log
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Editores
+.vscode/
+.idea/
+
+# Claude Code (configuracoes locais)
+.claude/settings.local.json

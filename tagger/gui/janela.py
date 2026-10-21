@@ -1,9 +1,10 @@
 """
-Tagger v2.0 — interface gráfica (PySide6).
+Tagger — interface gráfica (PySide6).
 
-Executar:  python app.py
+Executar:  python -m tagger
 """
 
+import logging
 import subprocess
 import sys
 from pathlib import Path
@@ -11,23 +12,32 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QObject, QSettings, QThread, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QFont, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu,
+    QApplication, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu,
     QMessageBox, QProgressBar, QPushButton, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-import metadata
-from metadata import CAMPOS, carregar, formato, listar_audios, rotulo, validar_valor
-from gui import tema
-from gui.config import carregar_config, salvar_config
-from gui.configuracoes import DialogoConfiguracoes
-from gui.editor import PainelEditor
-from gui.icones import icone, icone_app, pixmap
-from gui.rascunho import Rascunho, executar_salvamento
-from gui.rotulo import Migalha, RotuloElidido
-from gui.tabela import FiltroFaixas, ModeloFaixas, TabelaFaixas
-from gui.vazio import TelaVazia
+from tagger.nucleo import metadata
+from tagger.nucleo.metadata import (
+    CAMPOS, analisar_extras, carregar, carregar_varios, foi_modificado, formato, limpar_extras, listar_audios,
+    mtime_atual, rotulo, validar_valor,
+)
+from tagger.nucleo.padroes import ItemRenomear, executar_renomeacao
+from tagger import __version__
+from tagger.gui import tema
+from tagger.gui.config import carregar_config, salvar_config
+from tagger.gui.configuracoes import DialogoConfiguracoes
+from tagger.gui.editor import PainelEditor
+from tagger.gui.erros import configurar_log, instalar_tratamento_de_erros
+from tagger.gui.icones import icone, icone_app, pixmap
+from tagger.gui.limpeza import DialogoLimpeza
+from tagger.gui.padrao import DialogoRenomear, DialogoTagsDoNome, lembrar_padrao
+from tagger.nucleo.rascunho import Rascunho, Renomeacao, executar_salvamento, migrar_historico
+from tagger.gui.rotulo import Migalha, RotuloElidido
+from tagger.gui.tabela import FiltroFaixas, ModeloFaixas, TabelaFaixas
+from tagger.gui.vazio import TelaVazia
 
-VERSAO = "2.0.0-dev"
+VERSAO = __version__
+log = logging.getLogger("tagger")
 MAX_RECENTES = 6
 CHAVES_APARENCIA = ("usar_escuro", "tema_escuro", "tema_claro", "acento", "fonte", "fonte_mono",
                     "tamanho_fonte", "densidade")
@@ -49,24 +59,36 @@ class Carregador(QThread):
     def run(self):
         faixas, falhas = [], []
         total = len(self.caminhos)
-        for i, caminho in enumerate(self.caminhos, start=1):
-            faixa = carregar(caminho)
-            (faixas if faixa else falhas).append(faixa or Path(caminho))
-            if i % 25 == 0 or i == total:
-                self.progresso.emit(i, total)
-        self.concluido.emit(faixas, falhas)
+        try:
+            for i, caminho in enumerate(self.caminhos, start=1):
+                try:
+                    faixa = carregar(caminho)
+                except Exception:          # nunca deixa a pasta "carregando para sempre"
+                    log.exception("Erro ao ler %s", caminho)
+                    faixa = None
+                (faixas if faixa else falhas).append(faixa or Path(caminho))
+                if i % 25 == 0 or i == total:
+                    self.progresso.emit(i, total)
+        finally:
+            self.concluido.emit(faixas, falhas)
 
 
 class Salvador(QThread):
     progresso = Signal(int, int)
     concluido = Signal(object)         # (registros, falhas, faixas)
 
-    def __init__(self, trabalhos, parent=None):
+    def __init__(self, trabalhos, mtimes, parent=None):
         super().__init__(parent)
         self.trabalhos = trabalhos
+        self.mtimes = mtimes
 
     def run(self):
-        resultado = executar_salvamento(self.trabalhos, lambda i, total: self.progresso.emit(i, total))
+        try:
+            resultado = executar_salvamento(self.trabalhos, lambda i, total: self.progresso.emit(i, total),
+                                            self.mtimes)
+        except Exception:
+            log.exception("Erro ao salvar")
+            resultado = ([], {t[0]: "erro inesperado (detalhes no tagger.log)" for t in self.trabalhos}, [])
         self.concluido.emit(resultado)
 
 
@@ -154,12 +176,11 @@ class JanelaPrincipal(QMainWindow):
         super().__init__()
         self.settings = QSettings("Tagger", "Tagger")
         self.config = carregar_config(self.settings)
-        metadata.VERSAO_ID3 = int(self.config["versao_id3"])
 
         self.rascunho = Rascunho()
         self.rascunho.ao_mudar = self._ao_mudar_rascunho
         self.historico_pendente = None   # (registros, "desfazer" | "refazer") aguardando Salvar
-        self.pilha_desfazer = []         # cada item: lista de registros (caminho, tags, capa)
+        self.pilha_desfazer = []         # cada item: lista de registros (caminho, tags, capa) ou Renomeacao
         self.pilha_refazer = []
         self.area_tags = None            # tags copiadas: {"tags": {...}, "capa": (dados, mime) | None}
 
@@ -168,7 +189,7 @@ class JanelaPrincipal(QMainWindow):
         self.fonte_mono = QFont()
         self._carregador = None
         self._salvador = None
-        self._substituir_ao_carregar = False
+        self._modo_carregar = "substituir"   # "substituir" | "adicionar" | "recarregar"
         self._config_pendente = None
         self.filtro_janelas = None       # FiltroJanelas, instalado pelo main()
 
@@ -206,6 +227,7 @@ class JanelaPrincipal(QMainWindow):
 
         self._criar_barra_status()
         self._criar_acoes()
+        self._aplicar_config_metadata()
 
         self.tela_vazia.definir_recentes(self._recentes())
         self.tela_vazia.definir_subpastas(self.config["subpastas"])
@@ -217,7 +239,7 @@ class JanelaPrincipal(QMainWindow):
         if not geometria or not self.restoreGeometry(geometria):
             self._geometria_inicial()
         self._encaixar_na_tela()
-        cabecalho = self.settings.value("cabecalho_v2")
+        cabecalho = self.settings.value("cabecalho_v3")
         if cabecalho:
             self.tabela.restaurar_cabecalho(cabecalho)
         if str(self.settings.value("painel_visivel", True)).lower() in ("false", "0"):
@@ -434,7 +456,11 @@ class JanelaPrincipal(QMainWindow):
         self._nova_acao("Mostrar/esconder o editor", ["Ctrl+E"], self.alternar_painel)
         self._nova_acao("Esc", ["Escape"], self._ao_escape)
         # ações das linhas (também aparecem no menu de clique direito)
+        self.acao_recarregar = self._nova_acao("Recarregar do disco", ["F5"], self.recarregar)
         self.acao_numerar = self._nova_acao("Numerar faixas", ["Ctrl+Shift+N"], self.numerar_faixas)
+        self.acao_renomear = self._nova_acao("Renomear pelas tags…", ["Ctrl+Shift+R"], self.renomear_pelas_tags)
+        self.acao_tags_nome = self._nova_acao("Preencher tags pelo nome…", ["Ctrl+Shift+T"], self.tags_pelo_nome)
+        self.acao_limpar = self._nova_acao("Limpar tags extras…", [], self.limpar_tags_extras)
         self.acao_copiar = self._nova_acao("Copiar tags", ["Ctrl+Shift+C"], self.copiar_tags)
         self.acao_colar = self._nova_acao("Colar tags", ["Ctrl+Shift+V"], self.colar_tags)
         self.acao_pasta = self._nova_acao("Mostrar na pasta", [], self.mostrar_na_pasta)
@@ -542,13 +568,21 @@ class JanelaPrincipal(QMainWindow):
         anterior = self.config
         self.config = self._config_pendente
         self._config_pendente = None
-        metadata.VERSAO_ID3 = int(self.config["versao_id3"])
+        self._aplicar_config_metadata()
         self.lbl_formato.setText(f"MP3 · ID3v2.{metadata.VERSAO_ID3}")
         if any(anterior.get(k) != self.config.get(k) for k in CHAVES_APARENCIA):
             self.aplicar_tema()
         if anterior.get("generos") != self.config.get("generos"):
             self._atualizar_generos()
         self.tela_vazia.definir_subpastas(self.config["subpastas"])
+
+    def _aplicar_config_metadata(self):
+        """Opções de gravação ficam no módulo metadata (a CLI usa os padrões de lá)."""
+        c = self.config
+        metadata.VERSAO_ID3 = int(c["versao_id3"])
+        metadata.MULTIVALOR = bool(c["multivalor"])
+        metadata.REMOVER_ID3V1 = bool(c["remover_id3v1"])
+        self.painel.lado_max_capa = int(c["lado_max_capa"]) if c["otimizar_capa"] else 0
 
     def abrir_configuracoes(self):
         dialogo = DialogoConfiguracoes(self.config, self)
@@ -613,7 +647,10 @@ class JanelaPrincipal(QMainWindow):
             self.pasta_atual = None
             self.settings.setValue("ultima_pasta", str(arquivos[0].parent))
 
-        self._substituir_ao_carregar = substituir
+        self._iniciar_carregador(arquivos, "substituir" if substituir else "adicionar")
+
+    def _iniciar_carregador(self, arquivos, modo):
+        self._modo_carregar = modo
         self.lbl_status.setText(f"Lendo {len(arquivos)} arquivos…")
         self._mostrar_progresso(0, len(arquivos))
         self._carregador = Carregador(arquivos, self)
@@ -626,10 +663,40 @@ class JanelaPrincipal(QMainWindow):
         self.lbl_status.setText(f"Lendo arquivos… {i}/{total}")
         self._mostrar_progresso(i, total)
 
+    def recarregar(self):
+        """F5: relê do disco os arquivos da lista (e acha arquivos novos na pasta aberta)."""
+        if not self.modelo.faixas or self._ocupado() or not self._confirmar_pendencias():
+            return
+        caminhos = [f.caminho for f in self.modelo.faixas]
+        if self.pasta_atual and self.pasta_atual.is_dir():
+            conhecidos = set(caminhos)
+            caminhos += [c for c in listar_audios(self.pasta_atual, recursivo=self.config["subpastas"])
+                         if c not in conhecidos]
+        self._iniciar_carregador(caminhos, "recarregar")
+
+    def _ao_recarregar(self, faixas, falhas):
+        existentes = self.modelo.por_caminho()
+        self.modelo.atualizar([f for f in faixas if f.caminho in existentes])
+        novos = self.modelo.adicionar([f for f in faixas if f.caminho not in existentes])
+        sumiram = set(falhas)
+        linhas = [i for i, f in enumerate(self.modelo.faixas) if f.caminho in sumiram]
+        if linhas:
+            self.modelo.remover(linhas)
+        self.painel.invalidar_capas()
+        self._carregar_selecao()
+        partes = [f"{len(faixas)} arquivo(s) relidos do disco"]
+        if novos:
+            partes.append(f"{novos} novo(s)")
+        if linhas:
+            partes.append(f"{len(linhas)} não existem mais ou não abrem e saíram da lista")
+        self.avisar(" · ".join(partes), ok=not linhas, erro=bool(linhas))
+
     def _ao_carregar(self, faixas, falhas):
         self._carregador = None
         self.progresso.setVisible(False)
-        if self._substituir_ao_carregar:
+        if self._modo_carregar == "recarregar":
+            self._ao_recarregar(faixas, falhas)
+        elif self._modo_carregar == "substituir":
             self.rascunho.descartar()
             self.historico_pendente = None
             self.pilha_desfazer.clear()
@@ -645,9 +712,11 @@ class JanelaPrincipal(QMainWindow):
         self._atualizar_generos()
         self._atualizar_migalha()
         self._atualizar_estado()
+        if self._modo_carregar == "recarregar":
+            return
         if falhas:
             self.avisar(f"{len(falhas)} arquivo(s) não puderam ser lidos (corrompidos ou não são MP3).", erro=True)
-        elif not self._substituir_ao_carregar:
+        elif self._modo_carregar == "adicionar":
             self.avisar(f"{novos} arquivo(s) adicionado(s).", ok=True)
 
     # ------------------------------------------------------------------ seleção e rascunho
@@ -694,11 +763,15 @@ class JanelaPrincipal(QMainWindow):
                 self.painel.marcar_erros([campo])
             return False
 
-        trabalhos = self.rascunho.trabalhos()
+        trabalhos, mtimes = self._trabalhos_conferidos()
+        if trabalhos is None:
+            return False
+        if not trabalhos:
+            return True
         if sincrono:
             QApplication.setOverrideCursor(Qt.WaitCursor)
             try:
-                resultado = executar_salvamento(trabalhos)
+                resultado = executar_salvamento(trabalhos, mtimes=mtimes)
             finally:
                 QApplication.restoreOverrideCursor()
             self._ao_salvar(resultado)
@@ -707,12 +780,60 @@ class JanelaPrincipal(QMainWindow):
         self._bloquear(True)
         self.lbl_status.setText(f"Salvando {len(trabalhos)} arquivos…")
         self._mostrar_progresso(0, len(trabalhos))
-        self._salvador = Salvador(trabalhos, self)
+        self._salvador = Salvador(trabalhos, mtimes, self)
         self._salvador.progresso.connect(self._ao_progresso_salvar)
         self._salvador.concluido.connect(self._ao_salvar)
         self._salvador.finished.connect(self._salvador.deleteLater)
         self._salvador.start()
         return True
+
+    def _trabalhos_conferidos(self):
+        """
+        Trabalhos do rascunho + {caminho: mtime esperado}. Se algum arquivo mudou no disco depois de lido
+        (outro player/tagger), pergunta: sobrescrever, recarregar esses (descarta as alterações deles)
+        ou cancelar. Devolve (None, None) se cancelou.
+        """
+        por_caminho = self.modelo.por_caminho()
+        faixas = [por_caminho[c] for c in self.rascunho.caminhos() if c in por_caminho]
+        mtimes = {f.caminho: f.mtime for f in faixas}
+        modificadas = [f for f in faixas if foi_modificado(f)]
+        if modificadas:
+            resposta = self._perguntar_modificados(modificadas)
+            if resposta == "cancelar":
+                return None, None
+            caminhos = [f.caminho for f in modificadas]
+            if resposta == "sobrescrever":
+                mtimes.update({c: mtime_atual(c) for c in caminhos})
+            else:
+                self.rascunho.descartar(caminhos)
+                relidas, _ = carregar_varios(caminhos)
+                self.modelo.atualizar(relidas)
+                self.painel.invalidar_capas(caminhos)
+                self._carregar_selecao()
+                self.avisar(f"{len(relidas)} arquivo(s) recarregados do disco; as alterações deles foram descartadas.")
+        return self.rascunho.trabalhos(), mtimes
+
+    def _perguntar_modificados(self, faixas):
+        """'sobrescrever', 'recarregar' ou 'cancelar'."""
+        n = len(faixas)
+        nomes = "\n".join(f"•  {f.nome}" for f in faixas[:6]) + (f"\n…e mais {n - 6}" if n > 6 else "")
+        caixa = QMessageBox(self)
+        caixa.setIcon(QMessageBox.Warning)
+        caixa.setWindowTitle("Arquivos alterados por outro programa")
+        caixa.setText(f"{'1 arquivo foi alterado' if n == 1 else f'{n} arquivos foram alterados'} "
+                      "no disco depois que o Tagger leu.")
+        caixa.setInformativeText(f"{nomes}\n\nSobrescrever grava as suas alterações por cima. Recarregar descarta "
+                                 "as suas alterações nesses arquivos e mostra o que está no disco.")
+        sobrescrever = caixa.addButton("Sobrescrever", QMessageBox.AcceptRole)
+        recarregar = caixa.addButton("Recarregar esses", QMessageBox.DestructiveRole)
+        caixa.addButton("Cancelar", QMessageBox.RejectRole)
+        caixa.setDefaultButton(sobrescrever)
+        caixa.exec()
+        if caixa.clickedButton() is sobrescrever:
+            return "sobrescrever"
+        if caixa.clickedButton() is recarregar:
+            return "recarregar"
+        return "cancelar"
 
     def _ao_progresso_salvar(self, i, total):
         self.lbl_status.setText(f"Salvando… {i}/{total}")
@@ -745,8 +866,11 @@ class JanelaPrincipal(QMainWindow):
         self._carregar_selecao()
         self._atualizar_generos()
         if falhas:
+            for caminho, erro in falhas.items():
+                log.warning("Não salvou %s: %s", caminho, erro)
             nomes = ", ".join(Path(c).name for c in list(falhas)[:3])
-            self.avisar(f"{len(falhas)} arquivo(s) não foram salvos (em uso ou somente leitura?): {nomes}", erro=True)
+            motivo = next(iter(falhas.values()))
+            self.avisar(f"{len(falhas)} arquivo(s) não foram salvos ({motivo}): {nomes}", erro=True)
         else:
             n = len(salvos)
             self.avisar("1 arquivo salvo" if n == 1 else f"{n} arquivos salvos", ok=True)
@@ -779,12 +903,34 @@ class JanelaPrincipal(QMainWindow):
             self.descartar()
             return
         if self.pilha_desfazer:
-            self._preparar_historico(self.pilha_desfazer.pop(), "desfazer")
+            item = self.pilha_desfazer.pop()
+            if isinstance(item, Renomeacao):
+                self._reverter_renomeacao(item, self.pilha_refazer, "Desfeito")
+            else:
+                self._preparar_historico(item, "desfazer")
 
     def refazer(self):
         if self._salvador is not None or not self.rascunho.vazio or not self.pilha_refazer:
             return
-        self._preparar_historico(self.pilha_refazer.pop(), "refazer")
+        item = self.pilha_refazer.pop()
+        if isinstance(item, Renomeacao):
+            self._reverter_renomeacao(item, self.pilha_desfazer, "Refeito")
+        else:
+            self._preparar_historico(item, "refazer")
+
+    def _reverter_renomeacao(self, item, pilha_oposta, verbo):
+        """Renomear não passa pelo rascunho: desfazer/refazer renomeia de volta na hora."""
+        plano = [ItemRenomear(origem, destino) for origem, destino in item.inversa().pares]
+        feitos, falhas = executar_renomeacao(plano)
+        self._aplicar_renomeacao(dict(feitos))
+        if feitos:
+            pilha_oposta.append(Renomeacao(feitos))
+        if falhas:
+            nomes = ", ".join(Path(c).name for c in list(falhas)[:3])
+            self.avisar(f"{verbo}: {len(feitos)} renomeado(s), {len(falhas)} falharam: {nomes}", erro=True)
+        else:
+            self.avisar(f"{verbo}: {len(feitos)} arquivo(s) com o nome anterior", ok=True)
+        self._atualizar_estado()
 
     def _preparar_historico(self, registros, tipo):
         mudou = self.rascunho.aplicar_registros(registros, self.modelo.por_caminho())
@@ -805,6 +951,8 @@ class JanelaPrincipal(QMainWindow):
         n = len(selecionadas)
         self.acao_numerar.setText(f"Numerar faixas (1 a {n})" if n > 1 else "Numerar faixas")
         self.acao_numerar.setEnabled(n > 0)
+        for acao in (self.acao_renomear, self.acao_tags_nome, self.acao_limpar):
+            acao.setEnabled(n > 0)
         self.acao_copiar.setEnabled(n > 0)
         self.acao_colar.setEnabled(n > 0 and self.area_tags is not None)
         self.acao_pasta.setEnabled(n > 0)
@@ -814,11 +962,16 @@ class JanelaPrincipal(QMainWindow):
         menu = QMenu(self)
         menu.addAction(self.acao_editar)
         menu.addAction(self.acao_numerar)
+        menu.addAction(self.acao_renomear)
+        menu.addAction(self.acao_tags_nome)
         menu.addSeparator()
         menu.addAction(self.acao_copiar)
         menu.addAction(self.acao_colar)
         menu.addSeparator()
+        menu.addAction(self.acao_limpar)
+        menu.addSeparator()
         menu.addAction(self.acao_pasta)
+        menu.addAction(self.acao_recarregar)
         menu.addAction(self.acao_remover)
         menu.addSeparator()
         menu.addAction(self.acao_tudo)
@@ -858,14 +1011,116 @@ class JanelaPrincipal(QMainWindow):
         if not selecionadas or not self.area_tags:
             return
         tags = dict(self.area_tags["tags"])
-        if len(selecionadas) > 1:            # título e faixa são únicos de cada música
-            tags.pop("title", None)
-            tags.pop("tracknumber", None)
+        if len(selecionadas) > 1:            # título, faixa e letra são únicos de cada música
+            for campo in ("title", "tracknumber", "lyrics"):
+                tags.pop(campo, None)
         self.rascunho.definir_por_faixa([(f, tags) for f in selecionadas])
         capa = self.area_tags.get("capa")
         if capa:
             self.rascunho.definir_capa([f.caminho for f in selecionadas], ("definir", capa[0], capa[1]))
         self.avisar(f"Tags coladas em {len(selecionadas)} arquivo(s) — clique em Salvar para gravar")
+
+    def _ocupado(self):
+        if self._carregador is not None or self._salvador is not None:
+            self.avisar("Aguarde: ainda estou trabalhando nos arquivos anteriores.")
+            return True
+        return False
+
+    def _lembrar_padrao(self, tipo, padrao):
+        self.config[f"padrao_{tipo}"] = padrao
+        self.config[f"recentes_{tipo}"] = lembrar_padrao(self.config[f"recentes_{tipo}"], padrao)
+        salvar_config(self.settings, self.config)
+
+    def renomear_pelas_tags(self):
+        selecionadas = self._faixas_selecionadas()
+        if not selecionadas or self._ocupado():
+            return
+        pendentes = any(self.rascunho.tem(f.caminho) for f in selecionadas)
+        dialogo = DialogoRenomear(selecionadas, self.rascunho.valor, self.config["padrao_renomear"],
+                                  self.config["recentes_renomear"], self.cores, pendentes, self)
+        if dialogo.exec() != QDialog.Accepted:
+            return
+        self._lembrar_padrao("renomear", dialogo.padrao)
+        feitos, falhas = executar_renomeacao([item for item in dialogo.plano if item.valido])
+        self._aplicar_renomeacao(dict(feitos))
+        if feitos:
+            self.pilha_desfazer.append(Renomeacao(feitos))
+            self.pilha_refazer.clear()
+        if falhas:
+            for caminho, erro in falhas.items():
+                log.warning("Não renomeou %s: %s", caminho, erro)
+            nomes = ", ".join(Path(c).name for c in list(falhas)[:3])
+            self.avisar(f"{len(feitos)} renomeado(s), {len(falhas)} falharam (em uso?): {nomes}", erro=True)
+        else:
+            self.avisar(f"{len(feitos)} arquivo(s) renomeado(s) — Ctrl+Z desfaz", ok=True)
+        self._atualizar_estado()
+
+    def _aplicar_renomeacao(self, mapa):
+        """Arquivos renomeados ({antigo: novo}): lista, rascunho e histórico passam a usar o caminho novo."""
+        if not mapa:
+            return
+        self.modelo.renomear(mapa)
+        self.rascunho.renomear(mapa)
+        migrar_historico(self.pilha_desfazer, mapa)
+        migrar_historico(self.pilha_refazer, mapa)
+        if self.historico_pendente:
+            registros, tipo = self.historico_pendente
+            pilha = [registros]
+            migrar_historico(pilha, mapa)
+            self.historico_pendente = (pilha[0], tipo)
+        self.painel.invalidar_capas([*mapa, *mapa.values()])
+        self._carregar_selecao()
+
+    def tags_pelo_nome(self):
+        selecionadas = self._faixas_selecionadas()
+        if not selecionadas or self._ocupado():
+            return
+        dialogo = DialogoTagsDoNome(selecionadas, self.rascunho.valor, self.config["padrao_tags"],
+                                    self.config["recentes_tags"], self.cores, self)
+        if dialogo.exec() != QDialog.Accepted:
+            return
+        self._lembrar_padrao("tags", dialogo.padrao)
+        self.rascunho.definir_por_faixa(dialogo.resultado)
+        n = len(dialogo.resultado)
+        self.avisar(f"Tags lidas do nome em {n} arquivo(s) — clique em Salvar para gravar")
+
+    def limpar_tags_extras(self):
+        if not self._faixas_selecionadas() or self._ocupado():
+            return
+        if any(self.rascunho.tem(f.caminho) for f in self._faixas_selecionadas()):
+            if not self._confirmar_pendencias():        # a limpeza grava na hora: salva (ou descarta) antes
+                return
+        selecionadas = self._faixas_selecionadas()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            analises = [analisar_extras(f.caminho) for f in selecionadas]
+        finally:
+            QApplication.restoreOverrideCursor()
+        dialogo = DialogoLimpeza(analises, self)
+        if dialogo.exec() != QDialog.Accepted:
+            return
+
+        opcoes = dialogo.opcoes()
+        limpos, falhas = 0, {}
+        caminhos = [f.caminho for f in selecionadas]
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            for caminho in caminhos:
+                try:
+                    limpos += bool(limpar_extras(caminho, **opcoes))
+                except Exception as erro:
+                    log.warning("Não limpou %s: %s", caminho, erro)
+                    falhas[caminho] = str(erro)
+            relidas, _ = carregar_varios(caminhos)
+            self.modelo.atualizar(relidas)
+            self.painel.invalidar_capas(caminhos)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._carregar_selecao()
+        if falhas:
+            self.avisar(f"{limpos} arquivo(s) limpos, {len(falhas)} falharam (em uso ou somente leitura?)", erro=True)
+        else:
+            self.avisar(f"{limpos} arquivo(s) limpos" if limpos else "Nada para limpar", ok=True)
 
     def mostrar_na_pasta(self):
         selecionadas = self._faixas_selecionadas()
@@ -1060,7 +1315,7 @@ class JanelaPrincipal(QMainWindow):
             return
         self.settings.setValue("geometria", self.saveGeometry())
         self.settings.setValue("divisor", self.divisor.saveState())
-        self.settings.setValue("cabecalho_v2", self.tabela.estado_cabecalho())
+        self.settings.setValue("cabecalho_v3", self.tabela.estado_cabecalho())
         if self._carregador is not None:
             self._carregador.wait(3000)
         super().closeEvent(evento)
@@ -1078,6 +1333,7 @@ def main():
     app.setApplicationName("Tagger")
     app.setApplicationVersion(VERSAO)
     app.setStyle("Fusion")
+    instalar_tratamento_de_erros(configurar_log(VERSAO))
     tema.registrar_fontes()
     filtro_janelas = FiltroJanelas(app)
     app.installEventFilter(filtro_janelas)

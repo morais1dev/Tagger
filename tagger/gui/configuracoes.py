@@ -9,8 +9,8 @@ from PySide6.QtWidgets import (
     QPlainTextEdit, QPushButton, QRadioButton, QSizePolicy, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from gui.config import DENSIDADES, PADROES
-from gui.tema import ACENTO_DO_TEMA, ACENTOS, acento_efetivo, familias_instaladas, temas_claros, temas_escuros
+from tagger.gui.config import DENSIDADES, PADROES
+from tagger.gui.tema import ACENTO_DO_TEMA, ACENTOS, acento_efetivo, familias_instaladas, temas_claros, temas_escuros
 
 AUTOMATICA = "Automática"
 
@@ -50,7 +50,7 @@ class DialogoConfiguracoes(QDialog):
     def __init__(self, config, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Configurações")
-        self.setMinimumSize(620, 560)
+        self.setMinimumSize(620, 700)
         self.original = deepcopy(config)
         self.config = deepcopy(config)
         self._preenchendo = False
@@ -220,6 +220,35 @@ class DialogoConfiguracoes(QDialog):
         v.addWidget(self.rb_v24)
 
         v.addSpacing(12)
+        v.addWidget(_rotulo("Ao salvar", "secao"))
+        self.ck_multivalor = QCheckBox("Gravar \"A; B\" como vários valores (artista, gênero, compositor…)")
+        self.ck_multivalor.setToolTip("Players modernos mostram cada artista/gênero separado. "
+                                      "Desligado, \"A; B\" é gravado como um texto só.")
+        self.ck_multivalor.toggled.connect(lambda on: self._definir("multivalor", on))
+        self.ck_id3v1 = QCheckBox("Remover a tag ID3v1 antiga (dos anos 90) dos arquivos salvos")
+        self.ck_id3v1.toggled.connect(lambda on: self._definir("remover_id3v1", on))
+        v.addWidget(self.ck_multivalor)
+        v.addWidget(self.ck_id3v1)
+
+        v.addSpacing(12)
+        v.addWidget(_rotulo("Capa", "secao"))
+        linha_capa = QHBoxLayout()
+        self.ck_otimizar = QCheckBox("Reduzir capas grandes ao inserir, para no máximo")
+        self.ck_otimizar.toggled.connect(lambda on: self._definir("otimizar_capa", on))
+        self.ck_otimizar.toggled.connect(lambda on: self.sp_lado_capa.setEnabled(on))
+        self.sp_lado_capa = QSpinBox()
+        self.sp_lado_capa.setRange(300, 3000)
+        self.sp_lado_capa.setSingleStep(100)
+        self.sp_lado_capa.setSuffix(" px")
+        self.sp_lado_capa.valueChanged.connect(lambda n: self._definir("lado_max_capa", n))
+        linha_capa.addWidget(self.ck_otimizar)
+        linha_capa.addWidget(self.sp_lado_capa)
+        linha_capa.addStretch()
+        v.addLayout(linha_capa)
+        v.addWidget(_rotulo("Imagens maiores que isso (ou com mais de 500 KB) viram JPEG. "
+                            "Uma capa de 5 MB em cada faixa pesa no álbum inteiro.", "ajuda"))
+
+        v.addSpacing(12)
         v.addWidget(_rotulo("Gêneros sugeridos no autocompletar", "secao"))
         v.addWidget(_rotulo("Um por linha. Os gêneros que já estão nos seus arquivos também aparecem.", "ajuda"))
         self.tx_generos = QPlainTextEdit()
@@ -242,6 +271,11 @@ class DialogoConfiguracoes(QDialog):
         self.ck_reabrir.setChecked(c["reabrir_ultima"])
         self.ck_total.setChecked(c["numerar_com_total"])
         (self.rb_v23 if int(c["versao_id3"]) == 3 else self.rb_v24).setChecked(True)
+        self.ck_multivalor.setChecked(c["multivalor"])
+        self.ck_id3v1.setChecked(c["remover_id3v1"])
+        self.ck_otimizar.setChecked(c["otimizar_capa"])
+        self.sp_lado_capa.setValue(int(c["lado_max_capa"]))
+        self.sp_lado_capa.setEnabled(c["otimizar_capa"])
         self.tx_generos.setPlainText("\n".join(c["generos"]))
         self._atualizar_amostras()
         self._preenchendo = False
@@ -285,7 +319,8 @@ class DialogoConfiguracoes(QDialog):
             self._definir("acento", cor.name())
 
     def _restaurar_padroes(self):
-        self.config = deepcopy(PADROES)
+        padroes_do_usuario = {k: v for k, v in self.config.items() if k.startswith(("padrao_", "recentes_"))}   # não aparecem aqui
+        self.config = deepcopy(PADROES) | padroes_do_usuario
         self._preencher()
         self.mudou.emit(deepcopy(self.config))
 
