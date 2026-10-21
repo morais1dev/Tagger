@@ -2,7 +2,7 @@
 
 All notable changes to Tagger are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [2.0.0] — unreleased
+## [2.0.0] — 2026-10-21
 
 First release of the desktop app.
 
