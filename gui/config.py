@@ -5,7 +5,7 @@ PADROES = {
     "usar_escuro": True,
     "tema_escuro": "grafite",
     "tema_claro": "claro",
-    "acento": "#3ddc97",
+    "acento": "tema",       # "tema" = usa a cor de destaque do próprio tema
     "fonte": "",            # "" = automática
     "fonte_mono": "",       # "" = automática
     "tamanho_fonte": 13,    # px

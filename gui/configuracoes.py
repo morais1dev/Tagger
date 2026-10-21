@@ -3,15 +3,14 @@
 from copy import deepcopy
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QIcon
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel,
-    QPlainTextEdit, QPushButton, QRadioButton, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+    QPlainTextEdit, QPushButton, QRadioButton, QSizePolicy, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from gui.config import DENSIDADES, PADROES
-from gui.icones import circulo
-from gui.tema import ACENTOS, familias_instaladas, temas_claros, temas_escuros
+from gui.tema import ACENTO_DO_TEMA, ACENTOS, acento_efetivo, familias_instaladas, temas_claros, temas_escuros
 
 AUTOMATICA = "Automática"
 
@@ -21,6 +20,19 @@ def _rotulo(texto, papel):
     lbl.setProperty("papel", papel)
     lbl.setWordWrap(True)
     return lbl
+
+
+def _bolinha(cor, lado=12):
+    pm = QPixmap(lado * 2, lado * 2)
+    pm.fill(Qt.transparent)
+    pintor = QPainter(pm)
+    pintor.setRenderHint(QPainter.Antialiasing)
+    pintor.setPen(Qt.NoPen)
+    pintor.setBrush(QColor(cor))
+    pintor.drawEllipse(0, 0, lado * 2, lado * 2)
+    pintor.end()
+    pm.setDevicePixelRatio(2)
+    return QIcon(pm)
 
 
 def _formulario():
@@ -38,7 +50,7 @@ class DialogoConfiguracoes(QDialog):
     def __init__(self, config, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Configurações")
-        self.setMinimumSize(560, 520)
+        self.setMinimumSize(620, 560)
         self.original = deepcopy(config)
         self.config = deepcopy(config)
         self._preenchendo = False
@@ -85,7 +97,6 @@ class DialogoConfiguracoes(QDialog):
         self.grupo_modo.addButton(self.rb_claro)
         self.rb_escuro.toggled.connect(lambda on: self._definir("usar_escuro", on))
         modo = QHBoxLayout()
-        modo.setSpacing(20)
         modo.addWidget(self.rb_escuro)
         modo.addWidget(self.rb_claro)
         modo.addStretch()
@@ -105,8 +116,9 @@ class DialogoConfiguracoes(QDialog):
             lambda: self._definir("tema_claro", self.cb_tema_claro.currentData()))
         form.addRow("Tema claro", self.cb_tema_claro)
 
-        acentos = QHBoxLayout()
-        acentos.setSpacing(8)
+        # linha 1: bolinhas de cor | linha 2: "Do tema" e "Personalizada…"
+        linha_cores = QHBoxLayout()
+        linha_cores.setSpacing(8)
         self.amostras = {}
         for nome, cor in ACENTOS:
             botao = QPushButton()
@@ -116,11 +128,26 @@ class DialogoConfiguracoes(QDialog):
             botao.setCursor(Qt.PointingHandCursor)
             botao.clicked.connect(lambda _=False, c=cor: self._definir("acento", c))
             self.amostras[cor] = botao
-            acentos.addWidget(botao)
+            linha_cores.addWidget(botao)
+        linha_cores.addStretch()
+
+        linha_botoes = QHBoxLayout()
+        linha_botoes.setSpacing(8)
+        self.btn_do_tema = QPushButton("Do tema")
+        self.btn_do_tema.setToolTip("Usa a cor de destaque de cada tema (ex.: roxo no Dracula)")
+        self.btn_do_tema.clicked.connect(lambda: self._definir("acento", ACENTO_DO_TEMA))
         self.btn_cor_livre = QPushButton("Personalizada…")
+        self.btn_cor_livre.setToolTip("Escolher qualquer cor")
         self.btn_cor_livre.clicked.connect(self._escolher_cor)
-        acentos.addWidget(self.btn_cor_livre)
-        acentos.addStretch()
+        for botao in (self.btn_do_tema, self.btn_cor_livre):
+            botao.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)   # nunca espreme o texto
+            linha_botoes.addWidget(botao)
+        linha_botoes.addStretch()
+
+        acentos = QVBoxLayout()
+        acentos.setSpacing(10)
+        acentos.addLayout(linha_cores)
+        acentos.addLayout(linha_botoes)
         form.addRow("Cor de destaque", acentos)
 
         familias = familias_instaladas()
@@ -171,7 +198,7 @@ class DialogoConfiguracoes(QDialog):
             v.addWidget(item)
         v.addSpacing(8)
         v.addWidget(_rotulo(
-            "Alterações ficam pendentes (marcadas com um ponto colorido) até você clicar em Salvar, inclusive "
+            "Alterações ficam pendentes (com o ponto verde) até você clicar em Salvar, inclusive "
             "as feitas por Desfazer, Numerar faixas, Colar tags e edição direto na tabela.", "ajuda"))
         v.addStretch()
         return w
@@ -224,23 +251,26 @@ class DialogoConfiguracoes(QDialog):
         indice = combo.findData(dado)
         combo.setCurrentIndex(max(0, indice))
 
+    def _tema_atual(self):
+        return self.config["tema_escuro"] if self.config["usar_escuro"] else self.config["tema_claro"]
+
     def _atualizar_amostras(self):
-        atual = QColor(self.config["acento"]).name()
+        do_tema = self.config["acento"] == ACENTO_DO_TEMA
+        self.btn_do_tema.setIcon(_bolinha(acento_efetivo(self._tema_atual(), ACENTO_DO_TEMA)))
+        self.btn_do_tema.setStyleSheet("border: 2px solid palette(window-text);" if do_tema else "")
+        atual = "" if do_tema else QColor(self.config["acento"]).name()
         for cor, botao in self.amostras.items():
             borda = "palette(window-text)" if cor == atual else "transparent"
-            botao.setStyleSheet(
-                f"QPushButton {{ background: {cor}; border: 2px solid {borda}; }}"
-                f"QPushButton:focus {{ border: 2px dotted palette(window-text); }}")
-        personalizada = atual not in self.amostras
-        # a cor aparece numa bolinha ao lado: texto colorido ficaria ilegível com cores muito claras/escuras
-        self.btn_cor_livre.setText("Personalizada" if personalizada else "Personalizada…")
-        self.btn_cor_livre.setIcon(circulo(atual) if personalizada else QIcon())
+            botao.setStyleSheet(f"background: {cor}; border: 2px solid {borda};")
+        personalizada = bool(atual) and atual not in self.amostras
+        self.btn_cor_livre.setIcon(_bolinha(atual) if personalizada else QIcon())
+        self.btn_cor_livre.setStyleSheet("border: 2px solid palette(window-text);" if personalizada else "")
 
     def _definir(self, chave, valor):
         if self._preenchendo or self.config.get(chave) == valor:
             return
         self.config[chave] = valor
-        if chave == "acento":
+        if chave in ("acento", "usar_escuro", "tema_escuro", "tema_claro"):
             self._atualizar_amostras()
         self.mudou.emit(deepcopy(self.config))
 
@@ -249,7 +279,8 @@ class DialogoConfiguracoes(QDialog):
         self._definir("generos", [l for l in linhas if l])
 
     def _escolher_cor(self):
-        cor = QColorDialog.getColor(QColor(self.config["acento"]), self, "Cor de destaque")
+        inicial = acento_efetivo(self._tema_atual(), self.config["acento"])
+        cor = QColorDialog.getColor(QColor(inicial), self, "Cor de destaque")
         if cor.isValid():
             self._definir("acento", cor.name())
 
