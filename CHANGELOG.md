@@ -2,6 +2,24 @@
 
 All notable changes to Tagger are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] — 2026-10-23
+
+### Added
+- **FLAC, Ogg Vorbis and M4A/MP4** support, alongside MP3, with the same fields: lyrics, multi-value `A; B`, track/disc totals, and front-cover-only replacement (on M4A, the first image; other embedded images are kept).
+- **Look up tags online** (`Ctrl+Shift+M`): search MusicBrainz for the release, match its tracks to your files and fetch the cover from the Cover Art Archive. The results become pending changes, so nothing is written until you save.
+- **Organize into folders** (`Ctrl+Shift+O`): move files into folders built from a pattern such as `{albumartist}/{album}/{tracknumber:02} - {title}`, with a live preview. It can be undone, can remove folders left empty, and takes the folder's cover image (`cover`, `folder` or `front`, `.jpg`/`.png`) along, only when the whole folder moves to the same destination.
+
+### Changed
+- The ID3 options (ID3v2.3/2.4, removing ID3v1) only apply to MP3. Multi-value applies to every format.
+- **Clean up extra tags** also works on FLAC, Ogg and M4A, where it removes the tags Tagger doesn't show (images are always kept). The ID3v1 and unreadable-frame options only apply to MP3.
+
+## [2.0.1] — 2026-10-23
+
+### Fixed
+- Pending changes could be lost when you chose **Save** before closing the app, opening another folder, reloading (F5) or cleaning tags, and a file failed to save (read-only, in use…). Tagger now stops and asks whether to go back (changes stay pending) or discard the changes of the files that failed.
+- Saving only removals (empty values, removing the cover) on a file without tags no longer creates an empty ID3 header.
+- **Clean up extra tags** runs in the background, so the window no longer freezes on large selections.
+
 ## [2.0.0] — 2026-10-21
 
 First release of the desktop app.

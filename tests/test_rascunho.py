@@ -136,6 +136,32 @@ def test_renomear_leva_o_rascunho_junto(faixas, tmp_path):
     assert r.caminhos() == {novo}
 
 
+@pytest.mark.parametrize("n", [2, 3])
+def test_renomear_troca_e_ciclo_nao_mistura_pendencias(tmp_path, n):
+    # n=2: A<->B; n=3: A->B->C->A. Cada arquivo leva as suas pendências, nada se perde.
+    caminhos = [tmp_path / f"{i}.mp3" for i in range(n)]
+    r = Rascunho()
+    for i, caminho in enumerate(caminhos):
+        r.definir([metadata.Faixa(caminho, {})], "title", f"T{i}")
+        r.definir_capa([caminho], ("definir", f"capa{i}".encode(), "image/jpeg"))
+    mapa = {caminhos[i]: caminhos[(i + 1) % n] for i in range(n)}
+    r.renomear(mapa)
+    for i, antigo in enumerate(caminhos):
+        novo = mapa[antigo]
+        assert r.tags[novo] == {"title": f"T{i}"}
+        assert r.capas[novo] == ("definir", f"capa{i}".encode(), "image/jpeg")
+    assert len(r.tags) == len(r.capas) == n
+
+
+def test_renomear_parcial_mantem_quem_nao_tem_pendencia(tmp_path):
+    a, b, c = (tmp_path / f"{n}.mp3" for n in "abc")
+    r = Rascunho()
+    r.definir([metadata.Faixa(a, {})], "title", "A")
+    r.definir_capa([b], ("remover",))
+    r.renomear({a: b, b: c})
+    assert r.tags == {b: {"title": "A"}} and r.capas == {c: ("remover",)}
+
+
 def test_migrar_historico(tmp_path):
     a, b, c = (tmp_path / n for n in ("a.mp3", "b.mp3", "c.mp3"))
     pilha = [[(a, {"title": ""}, SEM_CAPA)], Renomeacao([(c, a)])]

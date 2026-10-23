@@ -8,6 +8,13 @@ Princípios:
 - Ler NUNCA grava nada no arquivo (só `salvar` e `limpar_extras` gravam).
 - Uma gravação aplica várias tags (e a capa) de uma vez: um único save por arquivo.
 - Valor vazio ("") significa "remover a tag".
+
+Formatos: MP3 (ID3, aqui mesmo), FLAC e Ogg (Vorbis, Opus ou FLAC no Ogg; Vorbis comments,
+formatos/vorbis.py) e M4A/MP4 (átomos do iTunes, formatos/mp4.py). Os mesmos campos valem
+para todos. A capa é a imagem frontal (ver formatos.escolher_capa); no M4A/MP4, que não tem
+tipo de imagem, é a 1ª do átomo covr (e só JPEG/PNG).
+As opções de ID3 (VERSAO_ID3, REMOVER_ID3V1) e a limpeza de ID3v1 / frames
+desconhecidos só se aplicam ao MP3; nos outros formatos são ignoradas.
 """
 
 from dataclasses import dataclass, field
@@ -16,11 +23,19 @@ from pathlib import Path
 import re
 
 from mutagen import MutagenError
+from mutagen.flac import FLAC
 from mutagen.id3 import delete as apagar_id3
 from mutagen.id3 import (
     APIC, COMM, TALB, TCOM, TCON, TDRC, TEXT, TIT2, TPE1, TPE2, TPOS, TRCK, USLT,
 )
 from mutagen.mp3 import MP3
+from mutagen.mp4 import MP4
+from mutagen.oggflac import OggFLAC
+from mutagen.oggopus import OggOpus
+from mutagen.oggvorbis import OggVorbis
+
+from tagger.nucleo.formatos import TIPO_CAPA_FRONTAL, TIPO_OUTRA, escolher_capa
+from tagger.nucleo.formatos import mp4, vorbis
 
 # ---------------------------------------------------------------------------
 # Configuração
@@ -37,7 +52,10 @@ MULTIVALOR = True
 # Remove a tag ID3v1 (128 bytes no fim do arquivo, formato dos anos 90) ao salvar.
 REMOVER_ID3V1 = False
 
-EXTENSOES_SUPORTADAS = {".mp3"}
+EXTENSOES_SUPORTADAS = {".mp3", ".flac", ".ogg", ".m4a", ".mp4"}
+
+# formato (extensão sem ponto) -> módulo que lê/grava as tags. O MP3 (ID3) fica neste arquivo.
+_MODULOS = {"flac": vorbis, "ogg": vorbis, "m4a": mp4, "mp4": mp4}
 
 # Campos editáveis, na ordem em que aparecem na interface.
 # chave interna -> (rótulo, frame ID3)
@@ -71,10 +89,8 @@ SEPARADOR = "; "
 # no mesmo campo. A interface mostra isso como "‹vários valores›".
 VARIOS = "\x00<varios>\x00"
 
-# Tipos de imagem (APIC) tratados como "a capa": 3 = capa frontal, 0 = "outra"
-# (alguns programas gravam a capa assim). Contracapa, foto do artista etc. não são tocadas.
-TIPO_CAPA_FRONTAL = 3
-TIPO_OUTRA = 0
+# Tipos de imagem tratados como "a capa" (TIPO_CAPA_FRONTAL, TIPO_OUTRA): ver
+# formatos.escolher_capa. Contracapa, foto do artista etc. não são tocadas.
 
 # Frames que o Tagger mostra/edita. O resto é "extra" para limpar_extras().
 FRAMES_DO_TAGGER = {classe.__name__ for _rotulo, classe in CAMPOS.values()} | {"APIC"}
@@ -98,6 +114,7 @@ class Faixa:
     duracao: float = 0.0                        # segundos
     bitrate: int = 0                            # kbps
     mtime: int = 0                              # st_mtime_ns quando foi lido
+    formato: str = ""                           # "mp3", "flac", "ogg", "m4a" ou "mp4"
 
     @property
     def nome(self):
@@ -114,8 +131,38 @@ class Faixa:
 # ---------------------------------------------------------------------------
 
 def formato(arquivo):
+    """'mp3', 'flac', 'ogg', 'm4a' ou 'mp4' pela extensão; None se não for suportado."""
     extensao = Path(arquivo).suffix.lower()
     return extensao[1:] if extensao in EXTENSOES_SUPORTADAS else None
+
+
+def _abrir(arquivo, fmt):
+    """Objeto do mutagen para o formato. Levanta MutagenError/OSError se o arquivo for inválido."""
+    if fmt == "mp3":
+        return MP3(arquivo)
+    if fmt == "flac":
+        return FLAC(arquivo)
+    if fmt == "ogg":
+        # .ogg pode ter Vorbis (o comum), Opus ou FLAC dentro; os três usam Vorbis comments
+        for classe in (OggVorbis, OggOpus):
+            try:
+                return classe(arquivo)
+            except MutagenError:
+                continue
+        return OggFLAC(arquivo)
+    if fmt in ("m4a", "mp4"):
+        return MP4(arquivo)
+    raise MutagenError(f"formato não suportado: {Path(arquivo).name}")
+
+
+def curingas_audio():
+    """('*.flac', '*.m4a', '*.mp3', ...) para filtros de diálogos de arquivo."""
+    return tuple(f"*{extensao}" for extensao in sorted(EXTENSOES_SUPORTADAS))
+
+
+def nomes_formatos():
+    """'FLAC, M4A, MP3, MP4, OGG': para textos da interface."""
+    return ", ".join(extensao[1:].upper() for extensao in sorted(EXTENSOES_SUPORTADAS))
 
 
 def listar_audios(pasta, recursivo=True):
@@ -159,7 +206,7 @@ def _frame_sem_descricao(tags, frame_id):
     return next((f for f in frames if f.desc == ""), frames[0] if frames else None)
 
 
-def _ler_campo(tags, campo):
+def _ler_campo_id3(tags, campo):
     if tags is None:
         return ""
 
@@ -184,34 +231,45 @@ def _frames_capa(tags):
     """Os frames APIC que o Tagger considera "a capa": os frontais; se não houver, o 1º do tipo "outra"."""
     if not tags:
         return []
-    imagens = tags.getall("APIC")
-    frontais = [img for img in imagens if img.type == TIPO_CAPA_FRONTAL]
-    if frontais:
-        return frontais
-    outras = [img for img in imagens if img.type == TIPO_OUTRA]
-    return outras[:1]
+    return escolher_capa(tags.getall("APIC"))
+
+
+def _ler_campo(audio, fmt, campo):
+    if fmt == "mp3":
+        return _ler_campo_id3(audio.tags, campo)
+    return SEPARADOR.join(_MODULOS[fmt].ler(audio, campo))
+
+
+def _capas(audio, fmt):
+    """[(dados, mime)] das imagens que são "a capa" (ver formatos.escolher_capa)."""
+    if fmt == "mp3":
+        return [(frame.data, frame.mime) for frame in _frames_capa(audio.tags)]
+    return _MODULOS[fmt].capas(audio)
 
 
 def carregar(arquivo):
     """Lê um arquivo e devolve uma Faixa, ou None se não for suportado/válido."""
     caminho = Path(arquivo)
-    if formato(caminho) != "mp3":
+    fmt = formato(caminho)
+    if fmt is None:
         return None
 
     try:
         mtime = caminho.stat().st_mtime_ns
-        audio = MP3(caminho)
-    except (MutagenError, OSError):     # MutagenError cobre cabeçalho inválido, ID3 corrompido etc.
+        audio = _abrir(caminho, fmt)
+        tags = {campo: _ler_campo(audio, fmt, campo) for campo in CAMPOS}
+        tem_capa = bool(_capas(audio, fmt))
+    except (MutagenError, OSError):     # MutagenError cobre cabeçalho inválido, tag corrompida etc.
         return None
 
-    tags = audio.tags
     return Faixa(
         caminho=caminho,
-        tags={campo: _ler_campo(tags, campo) for campo in CAMPOS},
-        tem_capa=bool(_frames_capa(tags)),
-        duracao=audio.info.length,
-        bitrate=audio.info.bitrate // 1000,
+        tags=tags,
+        tem_capa=tem_capa,
+        duracao=audio.info.length or 0.0,
+        bitrate=(audio.info.bitrate or 0) // 1000,
         mtime=mtime,
+        formato=fmt,
     )
 
 
@@ -244,15 +302,15 @@ def valores_comuns(faixas):
 
 
 def ler_capa(arquivo):
-    """Devolve (bytes, mime) da capa (ver _frames_capa), ou None."""
+    """Devolve (bytes, mime) da capa (ver formatos.escolher_capa), ou None."""
+    fmt = formato(arquivo)
+    if fmt is None:
+        return None
     try:
-        tags = MP3(arquivo).tags
+        capas = _capas(_abrir(arquivo, fmt), fmt)
     except (MutagenError, OSError):
         return None
-    frames = _frames_capa(tags)
-    if not frames:
-        return None
-    return frames[0].data, frames[0].mime
+    return capas[0] if capas else None
 
 
 # ---------------------------------------------------------------------------
@@ -323,13 +381,13 @@ def _aplicar_campo(tags, campo, valor):
     if campo == "comment":
         for chave in [k for k, f in tags.items() if k.startswith("COMM") and f.desc == ""]:
             del tags[chave]
-        tags.delall("TXXX:comment")   # formato alternativo, ver _ler_campo
+        tags.delall("TXXX:comment")   # formato alternativo, ver _ler_campo_id3
         if valor:
             tags.add(COMM(encoding=3, lang="eng", desc="", text=[valor]))
         return
 
     if campo == "lyrics":
-        # troca só a letra que o Tagger mostra (ver _ler_campo); letras com outra descrição ficam
+        # troca só a letra que o Tagger mostra (ver _ler_campo_id3); letras com outra descrição ficam
         frame = _frame_sem_descricao(tags, "USLT")
         if frame is not None:
             del tags[frame.HashKey]
@@ -378,22 +436,37 @@ def salvar(arquivo, alteracoes, capa=None):
       - "" remove a tag
       - VARIOS é ignorado (campo não foi tocado numa edição em lote)
     capa: None (não mexe), ("definir", dados, mime) ou ("remover",)
-    Cria o cabeçalho ID3 só aqui, se o arquivo ainda não tiver um.
+    Cria o cabeçalho de tags (ID3, Vorbis comment, ilst) só aqui, se o arquivo ainda não tiver um.
     """
-    audio = MP3(arquivo)
+    fmt = formato(arquivo)
+    audio = _abrir(arquivo, fmt)
     if audio.tags is None:
-        if not alteracoes and (capa is None or capa[0] == "remover"):
-            return            # nada a gravar e nada a remover
-        audio.add_tags()
+        grava_algo = (any(valor and valor != VARIOS for campo, valor in alteracoes.items() if campo in CAMPOS)
+                      or (capa is not None and capa[0] == "definir"))
+        if grava_algo:
+            audio.add_tags()
+        elif capa is None or not _capas(audio, fmt):
+            return            # só remoções num arquivo sem tags: não cria um cabeçalho vazio
+        # (sobra o FLAC sem Vorbis comment mas com capa: as imagens dele ficam fora das tags)
 
-    for campo, valor in alteracoes.items():
-        if campo not in CAMPOS or valor == VARIOS:
-            continue
-        _aplicar_campo(audio.tags, campo, valor)
+    if audio.tags is not None:
+        for campo, valor in alteracoes.items():
+            if campo not in CAMPOS or valor == VARIOS:
+                continue
+            if fmt == "mp3":
+                _aplicar_campo(audio.tags, campo, valor)
+            else:
+                _MODULOS[fmt].gravar(audio, campo, dividir_valores(campo, valor) if valor else [])
     if capa is not None:
-        _aplicar_capa(audio.tags, capa)
+        if fmt == "mp3":
+            _aplicar_capa(audio.tags, capa)
+        else:
+            _MODULOS[fmt].aplicar_capa(audio, capa)
 
-    _gravar(audio)
+    if fmt == "mp3":
+        _gravar(audio)
+    else:
+        audio.save()
 
 
 def salvar_varios(arquivos, alteracoes):
@@ -421,9 +494,16 @@ def remover_capa(arquivo):
 
 # ---------------------------------------------------------------------------
 # Limpeza (ID3v1, frames não reconhecidos e frames que o Tagger não mostra)
+#
+# Em FLAC/Ogg/M4A só existe a parte "extras" (chaves que o Tagger não mostra; capa e
+# outras imagens nunca são apagadas). ID3v1 e frames desconhecidos são coisas do ID3:
+# analisar_extras() devolve False/0 e limpar_extras() ignora essas opções.
 # ---------------------------------------------------------------------------
 
 def tem_id3v1(arquivo):
+    """True se o MP3 termina numa tag ID3v1. Outros formatos: sempre False (não se corta o fim deles)."""
+    if formato(arquivo) != "mp3":
+        return False
     try:
         with open(arquivo, "rb") as f:
             f.seek(-128, 2)
@@ -442,12 +522,20 @@ def analisar_extras(arquivo):
     """
     O que limpar_extras() removeria. Devolve
     {"id3v1": bool, "desconhecidos": int, "extras": {frame_id: quantidade}}.
+    Em FLAC/Ogg/M4A as chaves de "extras" são as do formato (ex.: "REPLAYGAIN_TRACK_GAIN", "©too").
     """
     resultado = {"id3v1": tem_id3v1(arquivo), "desconhecidos": 0, "extras": {}}
+    fmt = formato(arquivo)
+    if fmt is None:
+        return resultado
     try:
-        tags = MP3(arquivo).tags
+        audio = _abrir(arquivo, fmt)
     except (MutagenError, OSError):
         return resultado
+    if fmt != "mp3":
+        resultado["extras"] = _MODULOS[fmt].extras(audio)
+        return resultado
+    tags = audio.tags
     if tags is not None:
         resultado["desconhecidos"] = len(tags.unknown_frames)
         for frame in tags.values():
@@ -458,7 +546,14 @@ def analisar_extras(arquivo):
 
 def limpar_extras(arquivo, id3v1=False, desconhecidos=False, extras=False):
     """Remove o que foi pedido, num único save. Devolve False se não havia nada a fazer."""
-    audio = MP3(arquivo)
+    fmt = formato(arquivo)
+    audio = _abrir(arquivo, fmt)
+    if fmt != "mp3":
+        if not (extras and _MODULOS[fmt].remover_extras(audio)):
+            return False      # id3v1/desconhecidos não existem fora do MP3
+        audio.save()
+        return True
+
     tags = audio.tags
     mudou = False
     if tags is not None:

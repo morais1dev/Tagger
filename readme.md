@@ -1,14 +1,14 @@
 # Tagger
 
-Tagger is a desktop app for editing and organizing the metadata of MP3 files. Open a folder, edit one file or hundreds at once, review your changes and save — nothing is written to disk until you click **Save**.
+Tagger is a desktop app for editing and organizing the metadata of MP3, FLAC, Ogg Vorbis and M4A files. Open a folder, edit one file or hundreds at once, review your changes and save — nothing is written to disk until you click **Save**.
 
 ![Tagger main window](docs/screenshot.png)
 
 ## Versions
 
 - **v1.0:** Command-line interface (CLI) with the shared metadata backend for individual and bulk MP3 editing.
-- **v2.0 (current):** Desktop application with a graphical interface built with **PySide6 (Qt)**, on the same backend.
-- **v2.1 (planned):** FLAC/OGG/M4A support, automatic tag lookup (MusicBrainz + Cover Art Archive) and organizing files into `Artist/Album/` folders.
+- **v2.0:** Desktop application with a graphical interface built with **PySide6 (Qt)**, on the same backend.
+- **v2.1 (current):** FLAC/OGG/M4A support, online tag lookup (MusicBrainz + Cover Art Archive) and organizing files into `Artist/Album/` folders.
 - **v3.0 (planned):** Cross-platform application (web and mobile) built with Flutter and Dart.
 
 ## Features
@@ -20,6 +20,8 @@ Tagger is a desktop app for editing and organizing the metadata of MP3 files. Op
 - Fields: title, artist, album, album artist, track, disc, year, genre (with autocomplete), composer, lyricist, comment and **lyrics**.
 - Number tracks in table order, and copy/paste tags between files.
 - Values are validated as you type (year, track/disc numbers, genre).
+- Formats: MP3 (ID3), FLAC and Ogg Vorbis (Vorbis comments), M4A/MP4 (iTunes tags), all with the same fields.
+- **Look up tags online**: find the release on MusicBrainz, match its tracks to your files and get the cover from the Cover Art Archive. The results arrive as pending changes for you to review. This is the only feature that uses the internet.
 
 **Safe by design**
 - Every edit is a *pending change* (marked with a dot) until you save; discard any time.
@@ -35,19 +37,20 @@ Tagger is a desktop app for editing and organizing the metadata of MP3 files. Op
 
 **Organizing**
 - **Rename files from tags** with a pattern such as `{tracknumber:02} - {artist} - {title}`, with a live preview, conflict detection and Windows-safe file names (undoable).
+- **Organize into folders** with a pattern such as `{albumartist}/{album}/{tracknumber:02} - {title}`, with a live preview (undoable). It can remove folders left empty, and the folder's cover image (`cover`, `folder` or `front`, `.jpg`/`.png`) goes along when the whole folder moves to the same destination.
 - **Fill tags from file names** with a pattern such as `%artist% - %title%`, including parent folders (`%artist%/%album%/%track% - %title%`).
 - Real multi-value tags: `Artist A; Artist B` is saved as two values that modern players understand.
-- Clean up extra tags: remove the old ID3v1 tag, unreadable frames, or everything Tagger doesn't show.
+- Clean up extra tags: remove everything Tagger doesn't show, and on MP3 also the old ID3v1 tag and unreadable frames.
 
 **Look & feel**
 - Several dark and light themes, accent colors, fonts, font size and row density.
-- Choice between ID3v2.3 (most compatible) and ID3v2.4.
+- Choice between ID3v2.3 (most compatible) and ID3v2.4 for MP3.
 
 ## Installation and usage
 
 ### Windows executable
 
-Download `Tagger.exe` from the [Releases](../../releases) page and run it — no Python needed. You can also drag MP3 files or folders onto the `.exe`.
+Download `Tagger.exe` from the [Releases](../../releases) page and run it — no Python needed. You can also drag audio files or folders onto the `.exe`.
 
 ### From source
 
@@ -91,6 +94,8 @@ python -m tagger.cli
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste tags |
 | `Ctrl+Shift+R` | Rename files from tags |
 | `Ctrl+Shift+T` | Fill tags from file names |
+| `Ctrl+Shift+O` | Organize into folders |
+| `Ctrl+Shift+M` | Look up tags online (MusicBrainz) |
 
 Right-click the table for all row actions, and right-click the column header to show/hide columns.
 
@@ -100,10 +105,11 @@ Right-click the table for all row actions, and right-click the column header to 
 |---|---|
 | `{tracknumber:02} - {artist} - {title}` | `03 - Aurora Lane - Afterglow.mp3` |
 | `{discnumber}-{tracknumber:02} {title}` | `1-03 Afterglow.mp3` |
+| `{albumartist}/{album}/{tracknumber:02} - {title}` (organizing) | `Aurora Lane/Daybreak/03 - Afterglow.flac` |
 | `%artist% - %title%` (reading) | `Aurora Lane - Afterglow.mp3` → artist, title |
 | `%artist%/%album%/%track% - %title%` (reading) | uses the two parent folders too |
 
-Both `{field}` and `%field%` work in either direction. Fields: `title`, `artist`, `album`, `albumartist`, `tracknumber` (`track`), `discnumber` (`disc`), `date` (`year`), `genre`, `composer`, `lyricist`, `comment`, `lyrics`. `{field:02}` pads numbers with zeros, and `{*}` skips text when reading names.
+Both `{field}` and `%field%` work in either direction. Fields: `title`, `artist`, `album`, `albumartist`, `tracknumber` (`track`), `discnumber` (`disc`), `date` (`year`), `genre`, `composer`, `lyricist`, `comment`, `lyrics`. `{field:02}` pads numbers with zeros, and `{*}` skips text when reading names. When organizing, `/` separates folders, the file extension is kept, and empty tags become `Unknown Artist` / `Unknown Album` (album artist falls back to artist).
 
 ## Where things are stored
 
@@ -126,8 +132,9 @@ Project layout:
 tagger/
   __main__.py     GUI entry point (python -m tagger)
   cli.py          command-line version (python -m tagger.cli)
-  nucleo/         core logic, no Qt: tags (metadata.py), name patterns (padroes.py),
-                  pending changes and saving (rascunho.py)
+  nucleo/         core logic, no Qt: tags (metadata.py + formatos/ for FLAC/Ogg/M4A),
+                  name patterns (padroes.py), pending changes and saving (rascunho.py),
+                  online lookup (busca.py), organizing into folders (organizar.py)
   gui/            main window (janela.py), editor panel, table, dialogs, themes
     recursos/     icon and optional fonts
 tests/            pytest suite
@@ -139,7 +146,8 @@ tagger.spec       PyInstaller build
 
 - Python 3
 - [PySide6](https://doc.qt.io/qtforpython/) (Qt 6) for the interface
-- [Mutagen](https://mutagen.readthedocs.io/) for reading and writing ID3 tags
+- [Mutagen](https://mutagen.readthedocs.io/) for reading and writing ID3, Vorbis and MP4 tags
+- [MusicBrainz](https://musicbrainz.org/doc/MusicBrainz_API) and the [Cover Art Archive](https://coverartarchive.org/) for online lookup (Python's `urllib`, no extra dependencies)
 - Tkinter (CLI file picker only)
 
 ## License

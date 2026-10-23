@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
+import time
 import uuid
 
 from tagger.nucleo.metadata import CAMPOS
@@ -163,6 +164,17 @@ def planejar_renomeacao(itens, padrao):
     return plano
 
 
+def _renomear_com_tentativas(origem, destino, tentativas=3, espera=0.05):
+    """os.rename com poucas novas tentativas se o Windows negar por instantes (antivírus, indexador)."""
+    for tentativa in range(tentativas):
+        try:
+            return os.rename(origem, destino)
+        except PermissionError:
+            if tentativa == tentativas - 1:
+                raise
+            time.sleep(espera)
+
+
 def executar_renomeacao(plano):
     """
     Renomeia os itens válidos do plano. Devolve (feitos [(origem, destino)], falhas {origem: erro}).
@@ -175,7 +187,7 @@ def executar_renomeacao(plano):
             continue
         temporario = item.origem.with_name(f".{uuid.uuid4().hex}.tagger-tmp")
         try:
-            os.rename(item.origem, temporario)
+            _renomear_com_tentativas(item.origem, temporario)
             temporarios.append((item, temporario))
         except OSError as erro:
             falhas[item.origem] = erro.strerror or str(erro)
@@ -184,12 +196,12 @@ def executar_renomeacao(plano):
         try:
             if item.destino.exists():
                 raise FileExistsError("Já existe um arquivo com esse nome na pasta")
-            os.rename(temporario, item.destino)
+            _renomear_com_tentativas(temporario, item.destino)
             feitos.append((item.origem, item.destino))
         except OSError as erro:
             falhas[item.origem] = getattr(erro, "strerror", None) or str(erro)
             try:
-                os.rename(temporario, item.origem)
+                _renomear_com_tentativas(temporario, item.origem)
             except OSError:
                 falhas[item.origem] += f" (o arquivo ficou como {temporario.name})"
     return feitos, falhas

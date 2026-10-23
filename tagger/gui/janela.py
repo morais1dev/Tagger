@@ -18,18 +18,21 @@ from PySide6.QtWidgets import (
 
 from tagger.nucleo import metadata
 from tagger.nucleo.metadata import (
-    CAMPOS, analisar_extras, carregar, carregar_varios, foi_modificado, formato, limpar_extras, listar_audios,
-    mtime_atual, rotulo, validar_valor,
+    CAMPOS, analisar_extras, carregar, carregar_varios, curingas_audio, foi_modificado, formato, limpar_extras,
+    listar_audios, mtime_atual, nomes_formatos, rotulo, validar_valor,
 )
+from tagger.nucleo.organizar import executar_movimentos, executar_organizacao, remover_pastas_vazias
 from tagger.nucleo.padroes import ItemRenomear, executar_renomeacao
 from tagger import __version__
 from tagger.gui import tema
 from tagger.gui.config import carregar_config, salvar_config
 from tagger.gui.configuracoes import DialogoConfiguracoes
-from tagger.gui.editor import PainelEditor
+from tagger.gui.busca import DialogoBusca
+from tagger.gui.editor import PainelEditor, garantir_jpeg_ou_png
 from tagger.gui.erros import configurar_log, instalar_tratamento_de_erros
 from tagger.gui.icones import icone, icone_app, pixmap
 from tagger.gui.limpeza import DialogoLimpeza
+from tagger.gui.organizar import DialogoOrganizar
 from tagger.gui.padrao import DialogoRenomear, DialogoTagsDoNome, lembrar_padrao
 from tagger.nucleo.rascunho import Rascunho, Renomeacao, executar_salvamento, migrar_historico
 from tagger.gui.rotulo import Migalha, RotuloElidido
@@ -92,8 +95,55 @@ class Salvador(QThread):
         self.concluido.emit(resultado)
 
 
+class Movedor(QThread):
+    """Roda uma função de mover arquivos fora da thread da interface (cópia entre unidades pode demorar)."""
+    concluido = Signal(object)         # o que a função devolveu (ou o erro, se ela quebrou)
+
+    def __init__(self, funcao, parent=None):
+        super().__init__(parent)
+        self.funcao = funcao
+
+    def run(self):
+        try:
+            resultado = self.funcao()
+        except Exception as erro:
+            log.exception("Erro ao mover arquivos")
+            resultado = erro
+        self.concluido.emit(resultado)
+
+
+class Limpador(QThread):
+    progresso = Signal(int, int)
+    concluido = Signal(object)         # (limpos, falhas, faixas relidas)
+
+    def __init__(self, caminhos, opcoes, parent=None):
+        super().__init__(parent)
+        self.caminhos = caminhos
+        self.opcoes = opcoes
+
+    def run(self):
+        limpos, falhas, relidas = 0, {}, []
+        total = len(self.caminhos)
+        try:
+            for i, caminho in enumerate(self.caminhos, start=1):
+                try:
+                    limpos += bool(limpar_extras(caminho, **self.opcoes))
+                except Exception as erro:
+                    log.warning("Não limpou %s: %s", caminho, erro)
+                    falhas[caminho] = str(erro)
+                self.progresso.emit(i, total)
+            relidas, _ = carregar_varios(self.caminhos)
+        except Exception:
+            log.exception("Erro ao limpar")
+        finally:
+            self.concluido.emit((limpos, falhas, relidas))
+
+
+ROTULO_TAGS = {"mp3": lambda v: f"ID3v2.{v}", "flac": "Vorbis", "ogg": "Vorbis", "m4a": "iTunes", "mp4": "iTunes"}
+
+
 def expandir_caminhos(caminhos, recursivo=True):
-    """Pastas viram a lista de MP3 dentro delas; arquivos soltos passam direto."""
+    """Pastas viram a lista de áudios dentro delas; arquivos soltos passam direto."""
     resultado = []
     for caminho in map(Path, caminhos):
         if caminho.is_dir():
@@ -189,6 +239,10 @@ class JanelaPrincipal(QMainWindow):
         self.fonte_mono = QFont()
         self._carregador = None
         self._salvador = None
+        self._limpador = None
+        self._movedor = None
+        self._mtimes_antes, self._itens_movendo, self._pilha_movendo, self._desfazendo = {}, [], None, None
+        self._pastas_criadas = set()     # pastas de destino que o Tagger criou (para limpar ao desfazer)
         self._modo_carregar = "substituir"   # "substituir" | "adicionar" | "recarregar"
         self._config_pendente = None
         self.filtro_janelas = None       # FiltroJanelas, instalado pelo main()
@@ -460,6 +514,8 @@ class JanelaPrincipal(QMainWindow):
         self.acao_numerar = self._nova_acao("Numerar faixas", ["Ctrl+Shift+N"], self.numerar_faixas)
         self.acao_renomear = self._nova_acao("Renomear pelas tags…", ["Ctrl+Shift+R"], self.renomear_pelas_tags)
         self.acao_tags_nome = self._nova_acao("Preencher tags pelo nome…", ["Ctrl+Shift+T"], self.tags_pelo_nome)
+        self.acao_organizar = self._nova_acao("Organizar em pastas…", ["Ctrl+Shift+O"], self.organizar_em_pastas)
+        self.acao_busca_online = self._nova_acao("Buscar tags online…", ["Ctrl+Shift+M"], self.buscar_tags_online)
         self.acao_limpar = self._nova_acao("Limpar tags extras…", [], self.limpar_tags_extras)
         self.acao_copiar = self._nova_acao("Copiar tags", ["Ctrl+Shift+C"], self.copiar_tags)
         self.acao_colar = self._nova_acao("Colar tags", ["Ctrl+Shift+V"], self.colar_tags)
@@ -507,7 +563,7 @@ class JanelaPrincipal(QMainWindow):
             self.filtro_janelas.aplicar_em_todas(escuro)
         else:
             barra_de_titulo_escura(self, escuro)
-        self.lbl_formato.setText(f"MP3 · ID3v2.{metadata.VERSAO_ID3}")
+        self._atualizar_formato()
         self._ajustar_barra_topo()
         self._fixar_largura_salvar()
         self._atualizar_migalha()
@@ -569,7 +625,7 @@ class JanelaPrincipal(QMainWindow):
         self.config = self._config_pendente
         self._config_pendente = None
         self._aplicar_config_metadata()
-        self.lbl_formato.setText(f"MP3 · ID3v2.{metadata.VERSAO_ID3}")
+        self._atualizar_formato()
         if any(anterior.get(k) != self.config.get(k) for k in CHAVES_APARENCIA):
             self.aplicar_tema()
         if anterior.get("generos") != self.config.get("generos"):
@@ -620,12 +676,12 @@ class JanelaPrincipal(QMainWindow):
 
     def adicionar_arquivos(self):
         inicial = self.settings.value("ultima_pasta", str(Path.home()))
-        arquivos, _ = QFileDialog.getOpenFileNames(self, "Adicionar arquivos", inicial, "Arquivos MP3 (*.mp3)")
+        arquivos, _ = QFileDialog.getOpenFileNames(self, "Adicionar arquivos", inicial, f"Arquivos de áudio ({' '.join(curingas_audio())})")
         if arquivos:
             self.carregar_caminhos(arquivos, substituir=not self.modelo.faixas)
 
     def carregar_caminhos(self, caminhos, substituir, ja_confirmado=False):
-        if self._carregador is not None or self._salvador is not None:
+        if self._carregador is not None or self._gravando():
             self.avisar("Aguarde: ainda estou trabalhando nos arquivos anteriores.")
             return
         if substituir and not ja_confirmado and not self._confirmar_pendencias():
@@ -634,7 +690,7 @@ class JanelaPrincipal(QMainWindow):
         pastas = [Path(c) for c in caminhos if Path(c).is_dir()]
         arquivos = expandir_caminhos(caminhos, recursivo=self.config["subpastas"])
         if not arquivos:
-            self.avisar("Nenhum arquivo MP3 encontrado.")
+            self.avisar(f"Nenhum arquivo de áudio encontrado ({nomes_formatos()}).")
             return
 
         if pastas:
@@ -715,7 +771,7 @@ class JanelaPrincipal(QMainWindow):
         if self._modo_carregar == "recarregar":
             return
         if falhas:
-            self.avisar(f"{len(falhas)} arquivo(s) não puderam ser lidos (corrompidos ou não são MP3).", erro=True)
+            self.avisar(f"{len(falhas)} arquivo(s) não puderam ser lidos (corrompidos ou não são {nomes_formatos()}).", erro=True)
         elif self._modo_carregar == "adicionar":
             self.avisar(f"{novos} arquivo(s) adicionado(s).", ok=True)
 
@@ -748,8 +804,12 @@ class JanelaPrincipal(QMainWindow):
 
     # ------------------------------------------------------------------ salvar / descartar
     def salvar(self, sincrono=False):
-        """Grava TODAS as alterações pendentes. Devolve False se não salvou (ex.: valor inválido)."""
-        if self.rascunho.vazio or self._salvador is not None:
+        """
+        Grava TODAS as alterações pendentes. Devolve False se não salvou (ex.: valor inválido).
+        sincrono=True é o "salvar antes de continuar" (fechar, abrir outra pasta...): só devolve True se
+        tudo foi gravado, ou se o usuário aceitou descartar as alterações dos arquivos que falharam.
+        """
+        if self.rascunho.vazio or self._gravando():
             return self.rascunho.vazio
 
         erros = self.rascunho.validar()
@@ -775,7 +835,11 @@ class JanelaPrincipal(QMainWindow):
             finally:
                 QApplication.restoreOverrideCursor()
             self._ao_salvar(resultado)
-            return True
+            falhas = resultado[1]
+            if falhas and self._perguntar_falhas(falhas):
+                self.rascunho.descartar(falhas)
+                return True
+            return not falhas
 
         self._bloquear(True)
         self.lbl_status.setText(f"Salvando {len(trabalhos)} arquivos…")
@@ -834,6 +898,25 @@ class JanelaPrincipal(QMainWindow):
         if caixa.clickedButton() is recarregar:
             return "recarregar"
         return "cancelar"
+
+    def _perguntar_falhas(self, falhas):
+        """Salvar antes de continuar falhou em alguns arquivos. True = descartar as alterações deles e continuar."""
+        n = len(falhas)
+        nomes = "\n".join(f"•  {Path(c).name}: {erro}" for c, erro in list(falhas.items())[:6])
+        if n > 6:
+            nomes += f"\n…e mais {n - 6}"
+        caixa = QMessageBox(self)
+        caixa.setIcon(QMessageBox.Warning)
+        caixa.setWindowTitle("Alterações não salvas")
+        caixa.setText(f"{'1 arquivo não pôde ser salvo' if n == 1 else f'{n} arquivos não puderam ser salvos'} "
+                      "(em uso ou somente leitura?).")
+        caixa.setInformativeText(f"{nomes}\n\nVoltar mantém as alterações pendentes para você tentar de novo. "
+                                 "Descartar perde as alterações desses arquivos.")
+        descartar = caixa.addButton("Descartar e continuar", QMessageBox.DestructiveRole)
+        voltar = caixa.addButton("Voltar", QMessageBox.RejectRole)
+        caixa.setDefaultButton(voltar)
+        caixa.exec()
+        return caixa.clickedButton() is descartar
 
     def _ao_progresso_salvar(self, i, total):
         self.lbl_status.setText(f"Salvando… {i}/{total}")
@@ -897,7 +980,7 @@ class JanelaPrincipal(QMainWindow):
     # ------------------------------------------------------------------ desfazer / refazer
     def desfazer(self):
         """Com alterações pendentes: descarta. Senão: coloca os valores anteriores como pendentes."""
-        if self._salvador is not None:
+        if self._gravando():
             return
         if not self.rascunho.vazio or self.historico_pendente:
             self.descartar()
@@ -910,7 +993,7 @@ class JanelaPrincipal(QMainWindow):
                 self._preparar_historico(item, "desfazer")
 
     def refazer(self):
-        if self._salvador is not None or not self.rascunho.vazio or not self.pilha_refazer:
+        if self._gravando() or not self.rascunho.vazio or not self.pilha_refazer:
             return
         item = self.pilha_refazer.pop()
         if isinstance(item, Renomeacao):
@@ -919,17 +1002,74 @@ class JanelaPrincipal(QMainWindow):
             self._preparar_historico(item, "refazer")
 
     def _reverter_renomeacao(self, item, pilha_oposta, verbo):
-        """Renomear não passa pelo rascunho: desfazer/refazer renomeia de volta na hora."""
+        """Renomear/mover não passa pelo rascunho: desfazer/refazer move de volta na hora (em segundo plano)."""
         plano = [ItemRenomear(origem, destino) for origem, destino in item.inversa().pares]
-        feitos, falhas = executar_renomeacao(plano)
-        self._aplicar_renomeacao(dict(feitos))
-        if feitos:
-            pilha_oposta.append(Renomeacao(feitos))
-        if falhas:
-            nomes = ", ".join(Path(c).name for c in list(falhas)[:3])
-            self.avisar(f"{verbo}: {len(feitos)} renomeado(s), {len(falhas)} falharam: {nomes}", erro=True)
+        liberadas, criadas = set(self._pastas_criadas), []
+
+        def tarefa():
+            feitos, falhas = executar_movimentos(plano, criadas)
+            # pastas que o Tagger criou ao organizar e que ficaram vazias saem junto
+            remover_pastas_vazias({o.parent for o, _d in feitos}, permitidas=liberadas)
+            return feitos, falhas
+
+        pilha_origem = self.pilha_refazer if pilha_oposta is self.pilha_desfazer else self.pilha_desfazer
+
+        def concluir(resultado):
+            feitos, falhas = resultado
+            self._pastas_criadas.update(criadas)
+            self._aplicar_renomeacao(dict(feitos), self._mtimes_antes)
+            if feitos:
+                pilha_oposta.append(Renomeacao(feitos))
+            if falhas:        # o que não voltou continua no histórico para tentar de novo
+                pilha_origem.append(Renomeacao([(a, n) for a, n in item.pares if n in falhas]))
+                nomes = ", ".join(Path(c).name for c in list(falhas)[:3])
+                self.avisar(f"{verbo}: {len(feitos)} movido(s), {len(falhas)} falharam: {nomes}", erro=True)
+            else:
+                self.avisar(f"{verbo}: {len(feitos)} arquivo(s) no lugar anterior", ok=True)
+
+        self._mover_em_segundo_plano(tarefa, concluir, "Movendo arquivos…", plano, pilha_oposta, (item, pilha_origem))
+
+    def _mover_em_segundo_plano(self, tarefa, concluir, texto, itens=(), pilha=None, desfazendo=None):
+        """Bloqueia a janela (cursor de espera) enquanto `tarefa` roda; `concluir(resultado)` roda na interface.
+        itens: [ItemRenomear] previstos; se a tarefa quebrar, o que já foi movido é registrado em `pilha`.
+        desfazendo: (Renomeacao, pilha de onde saiu) quando é desfazer/refazer; None = organizar novo."""
+        self._mtimes_antes = {i.origem: mtime_atual(i.origem) for i in itens}
+        self._itens_movendo, self._pilha_movendo, self._desfazendo = list(itens), pilha, desfazendo
+        self._bloquear(True)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        self.lbl_status.setText(texto)
+        self.progresso.setVisible(True)
+        self.progresso.setRange(0, 0)            # indeterminado
+        self._movedor = Movedor(tarefa, self)
+        self._movedor.concluido.connect(lambda r: self._ao_mover(r, concluir))
+        self._movedor.finished.connect(self._movedor.deleteLater)
+        self._movedor.start()
+        self._atualizar_estado()
+
+    def _ao_mover(self, resultado, concluir):
+        self._movedor = None
+        QApplication.restoreOverrideCursor()
+        self._bloquear(False)
+        self.progresso.setRange(0, 1)
+        self.progresso.setVisible(False)
+        if isinstance(resultado, Exception):
+            # a tarefa quebrou no meio: registra o que já saiu do lugar (origem some, destino aparece)
+            feitos = [(i.origem, i.destino) for i in self._itens_movendo
+                      if not i.origem.exists() and i.destino.exists()]
+            self._aplicar_renomeacao(dict(feitos), self._mtimes_antes)
+            if feitos and self._pilha_movendo is not None:
+                self._pilha_movendo.append(Renomeacao(feitos))
+            if self._desfazendo is None:
+                self.pilha_refazer.clear()          # organizar novo invalida o refazer
+            else:                                   # o que não voltou continua na pilha de onde saiu
+                item, pilha_origem = self._desfazendo
+                feitos_inversos = {(d, o) for o, d in feitos}
+                faltam = [(a, n) for a, n in item.pares if (a, n) not in feitos_inversos]
+                if faltam:
+                    pilha_origem.append(Renomeacao(faltam))
+            self.avisar(f"Erro ao mover os arquivos ({resultado}); {len(feitos)} já foram movidos.", erro=True)
         else:
-            self.avisar(f"{verbo}: {len(feitos)} arquivo(s) com o nome anterior", ok=True)
+            concluir(resultado)
         self._atualizar_estado()
 
     def _preparar_historico(self, registros, tipo):
@@ -951,7 +1091,8 @@ class JanelaPrincipal(QMainWindow):
         n = len(selecionadas)
         self.acao_numerar.setText(f"Numerar faixas (1 a {n})" if n > 1 else "Numerar faixas")
         self.acao_numerar.setEnabled(n > 0)
-        for acao in (self.acao_renomear, self.acao_tags_nome, self.acao_limpar):
+        for acao in (self.acao_renomear, self.acao_tags_nome, self.acao_organizar, self.acao_busca_online,
+                     self.acao_limpar):
             acao.setEnabled(n > 0)
         self.acao_copiar.setEnabled(n > 0)
         self.acao_colar.setEnabled(n > 0 and self.area_tags is not None)
@@ -964,6 +1105,8 @@ class JanelaPrincipal(QMainWindow):
         menu.addAction(self.acao_numerar)
         menu.addAction(self.acao_renomear)
         menu.addAction(self.acao_tags_nome)
+        menu.addAction(self.acao_organizar)
+        menu.addAction(self.acao_busca_online)
         menu.addSeparator()
         menu.addAction(self.acao_copiar)
         menu.addAction(self.acao_colar)
@@ -1020,8 +1163,12 @@ class JanelaPrincipal(QMainWindow):
             self.rascunho.definir_capa([f.caminho for f in selecionadas], ("definir", capa[0], capa[1]))
         self.avisar(f"Tags coladas em {len(selecionadas)} arquivo(s) — clique em Salvar para gravar")
 
+    def _gravando(self):
+        """Uma thread está gravando nos arquivos (salvar ou limpar tags)."""
+        return self._salvador is not None or self._limpador is not None or self._movedor is not None
+
     def _ocupado(self):
-        if self._carregador is not None or self._salvador is not None:
+        if self._carregador is not None or self._gravando():
             self.avisar("Aguarde: ainda estou trabalhando nos arquivos anteriores.")
             return True
         return False
@@ -1055,11 +1202,69 @@ class JanelaPrincipal(QMainWindow):
             self.avisar(f"{len(feitos)} arquivo(s) renomeado(s) — Ctrl+Z desfaz", ok=True)
         self._atualizar_estado()
 
-    def _aplicar_renomeacao(self, mapa):
-        """Arquivos renomeados ({antigo: novo}): lista, rascunho e histórico passam a usar o caminho novo."""
+    def organizar_em_pastas(self):
+        selecionadas = self._faixas_selecionadas()
+        if not selecionadas or self._ocupado():
+            return
+        destino = self.pasta_atual or selecionadas[0].caminho.parent
+        pendentes = any(self.rascunho.tem(f.caminho) for f in selecionadas)
+        dialogo = DialogoOrganizar(selecionadas, self.rascunho.valor, self.config["padrao_organizar"],
+                                   self.config["recentes_organizar"], self.cores, str(destino), pendentes, self)
+        if dialogo.exec() != QDialog.Accepted:
+            return
+        self._lembrar_padrao("organizar", dialogo.padrao)
+        plano, remover, raiz, criadas = dialogo.plano, dialogo.remover_vazias, self.pasta_atual, []
+
+        def concluir(resultado):
+            feitos, falhas, removidas = resultado
+            self._pastas_criadas.update(criadas)
+            self._aplicar_renomeacao(dict(feitos), self._mtimes_antes)
+            if feitos:
+                self.pilha_desfazer.append(Renomeacao(feitos))
+                self.pilha_refazer.clear()
+            extra = f" · {len(removidas)} pasta(s) vazia(s) removida(s)" if removidas else ""
+            if falhas:
+                for caminho, erro in falhas.items():
+                    log.warning("Não moveu %s: %s", caminho, erro)
+                nomes = ", ".join(Path(c).name for c in list(falhas)[:3])
+                self.avisar(f"{len(feitos)} movido(s), {len(falhas)} falharam (em uso?): {nomes}{extra}", erro=True)
+            else:
+                self.avisar(f"{len(feitos)} arquivo(s) movido(s){extra} — Ctrl+Z desfaz", ok=True)
+
+        self._mover_em_segundo_plano(lambda: executar_organizacao(plano, remover, raiz, criadas), concluir,
+                                     f"Movendo {len(plano.validos())} arquivos…", plano.validos(), self.pilha_desfazer)
+
+    def buscar_tags_online(self):
+        selecionadas = self._faixas_selecionadas()
+        if not selecionadas or self._ocupado():
+            return
+        dialogo = DialogoBusca(selecionadas, self, valor=self.rascunho.valor)
+        if dialogo.exec() != QDialog.Accepted:
+            return
+        resultado = dialogo.resultado()
+        self.rascunho.definir_por_faixa(resultado.alteracoes)
+        if resultado.capa:
+            _, dados, mime = resultado.acao_capa
+            self.rascunho.definir_capa(resultado.caminhos_capa, ("definir", *garantir_jpeg_ou_png(dados, mime)))
+        mensagem = f"Tags online aplicadas em {resultado.alteradas} arquivo(s) — clique em Salvar para gravar"
+        if resultado.sem_par:
+            nomes = ", ".join(f.nome for f in resultado.sem_par[:3])
+            mensagem += f" · {len(resultado.sem_par)} sem correspondência (não alterados): {nomes}"
+        self.avisar(mensagem)
+
+    def _aplicar_renomeacao(self, mapa, mtimes_antes=None):
+        """Arquivos renomeados ({antigo: novo}): lista, rascunho e histórico passam a usar o caminho novo.
+        mtimes_antes: {antigo: mtime antes de mover}; se batia com o lido, o mtime novo (FAT32/exFAT muda)
+        passa a valer, senão uma alteração externa anterior continua sendo detectada no Salvar."""
         if not mapa:
             return
         self.modelo.renomear(mapa)
+        if mtimes_antes:
+            antigos = {novo: antigo for antigo, novo in mapa.items()}
+            for faixa in self.modelo.faixas:
+                antigo = antigos.get(faixa.caminho)
+                if antigo is not None and mtimes_antes.get(antigo) == faixa.mtime:
+                    faixa.mtime = mtime_atual(faixa.caminho) or faixa.mtime
         self.rascunho.renomear(mapa)
         migrar_historico(self.pilha_desfazer, mapa)
         migrar_historico(self.pilha_refazer, mapa)
@@ -1087,8 +1292,9 @@ class JanelaPrincipal(QMainWindow):
     def limpar_tags_extras(self):
         if not self._faixas_selecionadas() or self._ocupado():
             return
-        if any(self.rascunho.tem(f.caminho) for f in self._faixas_selecionadas()):
-            if not self._confirmar_pendencias():        # a limpeza grava na hora: salva (ou descarta) antes
+        pendentes = [f.caminho for f in self._faixas_selecionadas() if self.rascunho.tem(f.caminho)]
+        if pendentes:
+            if not self._confirmar_pendencias(pendentes):   # a limpeza grava na hora: salva (ou descarta) antes
                 return
         selecionadas = self._faixas_selecionadas()
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -1100,22 +1306,28 @@ class JanelaPrincipal(QMainWindow):
         if dialogo.exec() != QDialog.Accepted:
             return
 
-        opcoes = dialogo.opcoes()
-        limpos, falhas = 0, {}
         caminhos = [f.caminho for f in selecionadas]
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            for caminho in caminhos:
-                try:
-                    limpos += bool(limpar_extras(caminho, **opcoes))
-                except Exception as erro:
-                    log.warning("Não limpou %s: %s", caminho, erro)
-                    falhas[caminho] = str(erro)
-            relidas, _ = carregar_varios(caminhos)
-            self.modelo.atualizar(relidas)
-            self.painel.invalidar_capas(caminhos)
-        finally:
-            QApplication.restoreOverrideCursor()
+        self._bloquear(True)
+        self.lbl_status.setText(f"Limpando {len(caminhos)} arquivos…")
+        self._mostrar_progresso(0, len(caminhos))
+        self._limpador = Limpador(caminhos, dialogo.opcoes(), self)
+        self._limpador.progresso.connect(self._ao_progresso_limpar)
+        self._limpador.concluido.connect(self._ao_limpar)
+        self._limpador.finished.connect(self._limpador.deleteLater)
+        self._limpador.start()
+        self._atualizar_estado()
+
+    def _ao_progresso_limpar(self, i, total):
+        self.lbl_status.setText(f"Limpando… {i}/{total}")
+        self._mostrar_progresso(i, total)
+
+    def _ao_limpar(self, resultado):
+        limpos, falhas, relidas = resultado
+        self._limpador = None
+        self._bloquear(False)
+        self.progresso.setVisible(False)
+        self.modelo.atualizar(relidas)
+        self.painel.invalidar_capas([f.caminho for f in relidas])
         self._carregar_selecao()
         if falhas:
             self.avisar(f"{limpos} arquivo(s) limpos, {len(falhas)} falharam (em uso ou somente leitura?)", erro=True)
@@ -1172,10 +1384,24 @@ class JanelaPrincipal(QMainWindow):
         partes = self.pasta_atual.parts if self.pasta_atual else ["Arquivos avulsos"]
         self.lbl_migalha.definir(partes, self.cores, str(self.pasta_atual or ""))
 
+    def _atualizar_formato(self):
+        """Rodapé: formato (e tipo de tag) das faixas selecionadas, ou de todas se nada está selecionado."""
+        faixas = self._faixas_selecionadas() or self.modelo.faixas
+        formatos = {f.formato for f in faixas if f.formato}
+        if len(formatos) > 1:
+            texto = "Vários formatos"
+        elif formatos:
+            fmt = formatos.pop()
+            texto = f"{fmt.upper()} · {ROTULO_TAGS[fmt](metadata.VERSAO_ID3) if fmt == 'mp3' else ROTULO_TAGS[fmt]}"
+        else:
+            texto = f"MP3 · ID3v2.{metadata.VERSAO_ID3}"
+        self.lbl_formato.setText(texto)
+
     def _atualizar_estado(self):
         if not hasattr(self, "lbl_status") or not self.cores:
             return
-        trabalhando = self._carregador is not None or self._salvador is not None
+        self._atualizar_formato()
+        trabalhando = self._carregador is not None or self._gravando()
         total = len(self.modelo.faixas)
         n_sel = len(self.painel.faixas)
         if not trabalhando:
@@ -1212,9 +1438,9 @@ class JanelaPrincipal(QMainWindow):
         self._timer_aviso.start()
 
     # ------------------------------------------------------------------ confirmações
-    def _perguntar_salvar(self):
-        """'salvar', 'descartar' ou 'cancelar'."""
-        n = len(self.rascunho)
+    def _perguntar_salvar(self, n=None):
+        """'salvar', 'descartar' ou 'cancelar'. n: quantos arquivos têm alterações (padrão: todos)."""
+        n = len(self.rascunho) if n is None else n
         caixa = QMessageBox(self)
         caixa.setIcon(QMessageBox.Question)
         caixa.setWindowTitle("Alterações não salvas")
@@ -1233,15 +1459,21 @@ class JanelaPrincipal(QMainWindow):
             return "descartar"
         return "cancelar"
 
-    def _confirmar_pendencias(self):
-        """True = pode continuar (salvou, descartou ou não havia nada)."""
+    def _confirmar_pendencias(self, caminhos=None):
+        """True = pode continuar (salvou, descartou ou não havia nada).
+        Com `caminhos`, "Descartar" descarta só as alterações desses arquivos."""
         if self.rascunho.vazio:
             return True
-        resposta = self._perguntar_salvar()
+        resposta = self._perguntar_salvar(len(caminhos) if caminhos is not None else None)
         if resposta == "salvar":
             return self.salvar(sincrono=True)
         if resposta == "descartar":
-            self.descartar()
+            if caminhos is None:
+                self.descartar()
+            else:
+                self.rascunho.descartar(caminhos)
+                self.avisar("Alterações descartadas")
+                self._atualizar_estado()
             return True
         return False
 
@@ -1306,8 +1538,8 @@ class JanelaPrincipal(QMainWindow):
 
     # ------------------------------------------------------------------ fechar
     def closeEvent(self, evento):
-        if self._salvador is not None:
-            self.avisar("Aguarde terminar de salvar antes de fechar.")
+        if self._gravando():
+            self.avisar("Aguarde terminar de gravar os arquivos antes de fechar.")
             evento.ignore()
             return
         if not self._confirmar_pendencias():

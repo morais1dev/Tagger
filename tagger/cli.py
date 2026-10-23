@@ -6,7 +6,9 @@ Executar:  python -m tagger.cli
 
 import os, subprocess
 from pathlib import Path
-from tagger.nucleo.metadata import CAMPOS, CAMPOS_BULK, carregar, salvar, salvar_varios, validar_valor, rotulo
+from tagger.nucleo.metadata import (
+    CAMPOS, CAMPOS_BULK, carregar, curingas_audio, nomes_formatos, salvar, salvar_varios, validar_valor, rotulo,
+)
 from tagger import __version__
 
 # Na CLI os campos são escolhidos por número: 1 = primeiro campo de CAMPOS, etc.
@@ -20,7 +22,10 @@ def selecionar_arquivo():
 
     root = tk.Tk()
     root.withdraw()
-    arquivos = filedialog.askopenfilenames(title="Selecione os arquivos", filetypes=[("Arquivos MP3", "*.mp3")])
+    arquivos = filedialog.askopenfilenames(
+        title="Selecione os arquivos de áudio",
+        filetypes=[(f"Arquivos de áudio ({nomes_formatos()})", curingas_audio()), ("Todos os arquivos", "*.*")],
+    )
     root.destroy()
     return arquivos
 
@@ -78,7 +83,7 @@ def editar_arquivo(arquivo):
     faixa = carregar(arquivo)
 
     if faixa is None:
-        print("Formato não suportado ou arquivo inválido.")
+        print(f"Formato não suportado ou arquivo inválido. Formatos aceitos: {nomes_formatos()}.")
         input("\nPressione Enter para continuar...")
         return False
 
@@ -238,6 +243,7 @@ def modo_bulk():
 def mostrar_menu():
     limpar_tela()
     print(f"\n=== Tagger {__version__} (CLI) ===")
+    print(f"Formatos: {nomes_formatos()}")
     print("1 - Edição individual")
     print("2 - Bulk edit")
     print("0 - Sair")

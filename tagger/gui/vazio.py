@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLay
 from tagger.gui.icones import icone, pixmap
 from tagger.gui.rotulo import RotuloElidido
 from tagger.gui.tema import repolir
+from tagger.nucleo.metadata import nomes_formatos
 
 
 class LinhaRecente(QFrame):
@@ -94,7 +95,8 @@ class TelaVazia(QWidget):
 
         self.lbl_icone = QLabel(objectName="iconeDrop", alignment=Qt.AlignCenter)
         self.lbl_icone.setFixedSize(56, 56)
-        titulo = QLabel("Arraste uma pasta ou arquivos MP3 aqui", objectName="tituloVazio", alignment=Qt.AlignCenter)
+        titulo = QLabel("Arraste uma pasta ou arquivos de áudio aqui", objectName="tituloVazio",
+                        alignment=Qt.AlignCenter)
         self.lbl_texto = QLabel(objectName="textoVazio", alignment=Qt.AlignCenter)
         self.lbl_texto.setWordWrap(True)
         self.definir_subpastas(True)
@@ -153,7 +155,8 @@ class TelaVazia(QWidget):
 
     def definir_subpastas(self, incluir):
         inicio = "Subpastas são incluídas." if incluir else "Só os arquivos da própria pasta (sem subpastas)."
-        self.lbl_texto.setText(f"{inicio} Nada é gravado nos arquivos até você clicar em Salvar.")
+        self.lbl_texto.setText(f"{inicio} Formatos: {nomes_formatos()}. "
+                               "Nada é gravado nos arquivos até você clicar em Salvar.")
 
     def destacar(self, ativo):
         """Borda na cor de destaque enquanto o usuário arrasta arquivos por cima da janela."""

@@ -209,7 +209,9 @@ class DialogoConfiguracoes(QDialog):
         v.setContentsMargins(20, 20, 20, 20)
         v.setSpacing(10)
 
-        v.addWidget(_rotulo("Versão do ID3 ao salvar", "secao"))
+        v.addWidget(_rotulo("Versão do ID3 ao salvar (só MP3)", "secao"))
+        v.addWidget(_rotulo("FLAC, Ogg e M4A usam o formato de tags próprio deles; as opções de ID3 "
+                            "não mudam nada nesses arquivos.", "ajuda"))
         self.grupo_id3 = QButtonGroup(self)
         self.rb_v23 = QRadioButton("ID3v2.3 — mais compatível (Windows Explorer, carros, players antigos)")
         self.rb_v24 = QRadioButton("ID3v2.4 — mais recente")
@@ -223,9 +225,10 @@ class DialogoConfiguracoes(QDialog):
         v.addWidget(_rotulo("Ao salvar", "secao"))
         self.ck_multivalor = QCheckBox("Gravar \"A; B\" como vários valores (artista, gênero, compositor…)")
         self.ck_multivalor.setToolTip("Players modernos mostram cada artista/gênero separado. "
-                                      "Desligado, \"A; B\" é gravado como um texto só.")
+                                      "Desligado, \"A; B\" é gravado como um texto só. Vale para todos os formatos.")
         self.ck_multivalor.toggled.connect(lambda on: self._definir("multivalor", on))
-        self.ck_id3v1 = QCheckBox("Remover a tag ID3v1 antiga (dos anos 90) dos arquivos salvos")
+        self.ck_id3v1 = QCheckBox("Remover a tag ID3v1 antiga (dos anos 90) dos MP3 salvos")
+        self.ck_id3v1.setToolTip("Só existe em MP3. FLAC, Ogg e M4A não são afetados.")
         self.ck_id3v1.toggled.connect(lambda on: self._definir("remover_id3v1", on))
         v.addWidget(self.ck_multivalor)
         v.addWidget(self.ck_id3v1)

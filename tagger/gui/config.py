@@ -15,15 +15,17 @@ PADROES = {
     "reabrir_ultima": False,
     "numerar_com_total": True,
     # tags
-    "versao_id3": 3,
-    "multivalor": True,          # "A; B" vira vários valores ao salvar (artista, gênero...)
-    "remover_id3v1": False,
+    "versao_id3": 3,             # só MP3 (FLAC/Ogg/M4A não usam ID3)
+    "multivalor": True,          # "A; B" vira vários valores ao salvar (artista, gênero...), em todos os formatos
+    "remover_id3v1": False,      # só MP3
     "otimizar_capa": True,       # capas grandes viram JPEG de no máximo lado_max_capa px
     "lado_max_capa": 1000,
     # padrões (renomear pelas tags / tags pelo nome)
     "padrao_renomear": "{tracknumber:02} - {artist} - {title}",
     "padrao_tags": "%artist% - %title%",
+    "padrao_organizar": "{albumartist}/{album}/{tracknumber:02} - {title}",
     "recentes_renomear": [],
+    "recentes_organizar": [],
     "recentes_tags": [],
     "generos": [
         "Alternative", "Ambient", "Axé", "Blues", "Bossa Nova", "Classical", "Country", "Dance",

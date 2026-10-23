@@ -1,6 +1,6 @@
 """
 Diálogos de padrão de nome, com prévia ao vivo:
-- Renomear pelas tags: {tracknumber:02} - {artist} - {title}  ->  "03 - Artista - Música.mp3"
+- Renomear pelas tags: {tracknumber:02} - {artist} - {title}  ->  "03 - Artista - Música.flac" (a extensão é mantida)
 - Tags pelo nome:      %artist% - %title%                     ->  preenche o rascunho
 
 Nada é feito enquanto o diálogo está aberto: a janela principal lê o resultado

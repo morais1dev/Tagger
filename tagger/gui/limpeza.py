@@ -29,6 +29,96 @@ NOMES_FRAMES = {
     "UFID": "identificador único (MusicBrainz...)",
 }
 
+# O mesmo para FLAC/Ogg (Vorbis comments, sempre em maiúsculas aqui) e M4A (átomos do iTunes).
+# Átomos técnicos do M4A (gapless, iTunNORM, cpil, tmpo...) não aparecem: a limpeza não os remove
+# (ver nucleo/formatos/mp4.TECNICOS).
+NOMES_VORBIS = {
+    "ENCODER": "programa/configuração do encoder",
+    "ENCODEDBY": "codificado por",
+    "ENCODED-BY": "codificado por",
+    "ENCODING": "configuração do encoder",
+    "COPYRIGHT": "copyright",
+    "LABEL": "gravadora",
+    "ORGANIZATION": "gravadora",
+    "PUBLISHER": "gravadora",
+    "BPM": "BPM",
+    "KEY": "tom",
+    "INITIALKEY": "tom",
+    "ISRC": "ISRC",
+    "BARCODE": "código de barras",
+    "CATALOGNUMBER": "número de catálogo",
+    "MEDIA": "mídia de origem",
+    "SOURCEMEDIA": "mídia de origem",
+    "LENGTH": "duração gravada na tag",
+    "COMPILATION": "compilação",
+    "RATING": "avaliação (estrelas)",
+    "MOOD": "humor",
+    "GROUPING": "agrupamento",
+    "ARTISTSORT": "artista para ordenação",
+    "ALBUMSORT": "álbum para ordenação",
+    "TITLESORT": "título para ordenação",
+    "ALBUMARTISTSORT": "artista do álbum para ordenação",
+    "COMPOSERSORT": "compositor para ordenação",
+    "ORIGINALDATE": "data original de lançamento",
+    "ORIGINALYEAR": "ano original de lançamento",
+    "RELEASECOUNTRY": "país de lançamento",
+    "RELEASESTATUS": "situação do lançamento (MusicBrainz)",
+    "RELEASETYPE": "tipo de lançamento (MusicBrainz)",
+    "SCRIPT": "escrita (MusicBrainz)",
+    "WWW": "links",
+    "DISCID": "identificador do CD",
+    "CDDB": "identificador do CD",
+}
+
+NOMES_MP4 = {
+    "\xa9too": "programa/configuração do encoder",
+    "\xa9enc": "codificado por",
+    "\xa9grp": "agrupamento",
+    "cprt": "copyright",
+    "desc": "descrição",
+    "ldes": "descrição longa",
+    "soar": "artista para ordenação",
+    "soal": "álbum para ordenação",
+    "sonm": "título para ordenação",
+    "soaa": "artista do álbum para ordenação",
+    "soco": "compositor para ordenação",
+    "purd": "data de compra (iTunes)",
+    "apID": "conta da loja (iTunes)",
+    "ownr": "dono (iTunes)",
+    "xid ": "identificador da loja (iTunes)",
+    "plID": "identificador da loja (iTunes)",
+    "cnID": "identificador da loja (iTunes)",
+    "geID": "identificador da loja (iTunes)",
+    "atID": "identificador da loja (iTunes)",
+    "sfID": "identificador da loja (iTunes)",
+    "cmID": "identificador da loja (iTunes)",
+    "akID": "identificador da loja (iTunes)",
+    "iTunes_CDDB_IDs": "identificador do CD",
+}
+
+# Famílias de chaves com prefixo comum (em maiúsculas).
+PREFIXOS = {
+    "REPLAYGAIN_": "ajuste de volume (ReplayGain)",
+    "MUSICBRAINZ_": "identificadores do MusicBrainz",
+    "MUSICBRAINZ ": "identificadores do MusicBrainz",
+    "ACOUSTID_": "identificadores do AcoustID",
+    "ACOUSTID ": "identificadores do AcoustID",
+    "DISCOGS_": "dados do Discogs",
+}
+
+# Campos livres do M4A ("----:com.apple.iTunes:NOME"): mostrados só pelo NOME.
+_PREFIXO_LIVRE_MP4 = "----:"
+
+
+def nome_extra(chave):
+    """(chave curta para mostrar, descrição) de um frame ID3, chave Vorbis ou átomo MP4 extra."""
+    curta = chave
+    if chave.startswith(_PREFIXO_LIVRE_MP4):
+        curta = chave.rsplit(":", 1)[-1]
+    descricao = (NOMES_FRAMES.get(curta) or NOMES_MP4.get(curta) or NOMES_VORBIS.get(curta.upper())
+                 or next((d for prefixo, d in PREFIXOS.items() if curta.upper().startswith(prefixo)), None))
+    return curta, descricao or "outro"
+
 
 def _rotulo(texto, papel):
     lbl = QLabel(texto)
@@ -53,19 +143,23 @@ class DialogoLimpeza(QDialog):
                 extras[frame_id] = extras.get(frame_id, 0) + quantidade
         com_extras = sum(1 for a in analises if a["extras"])
 
-        self.ck_id3v1 = QCheckBox(f"Remover a tag ID3v1 antiga — {com_v1} de {n} arquivo(s)")
+        self.ck_id3v1 = QCheckBox(f"Remover a tag ID3v1 antiga (só MP3) — {com_v1} de {n} arquivo(s)")
         self.ck_id3v1.setChecked(bool(com_v1))
         self.ck_id3v1.setEnabled(bool(com_v1))
         self.ck_desconhecidos = QCheckBox(
-            f"Remover frames não reconhecidos (corrompidos ou de formato desconhecido) — {com_desconhecidos} arquivo(s)")
+            "Remover frames ID3 não reconhecidos (só MP3; corrompidos ou de formato desconhecido) — "
+            f"{com_desconhecidos} arquivo(s)")
         self.ck_desconhecidos.setChecked(bool(com_desconhecidos))
         self.ck_desconhecidos.setEnabled(bool(com_desconhecidos))
         self.ck_extras = QCheckBox(f"Remover tudo o que o Tagger não mostra — {com_extras} arquivo(s)")
         self.ck_extras.setEnabled(bool(extras))
 
-        lista = "\n".join(f"•  {frame_id} ×{quantidade}  —  {NOMES_FRAMES.get(frame_id, 'outro')}"
-                          for frame_id, quantidade in sorted(extras.items(), key=lambda i: -i[1]))
-        detalhes = _rotulo(lista or "Nenhum frame extra encontrado.", "ajuda")
+        linhas = []
+        for chave, quantidade in sorted(extras.items(), key=lambda i: -i[1]):
+            curta, descricao = nome_extra(chave)
+            linhas.append(f"•  {curta} ×{quantidade}  —  {descricao}")
+        lista = "\n".join(linhas)
+        detalhes = _rotulo(lista or "Nenhuma tag extra encontrada.", "ajuda")
         detalhes.setContentsMargins(26, 0, 0, 0)
 
         for ck in (self.ck_id3v1, self.ck_desconhecidos, self.ck_extras):
@@ -90,7 +184,9 @@ class DialogoLimpeza(QDialog):
         v.addWidget(self.ck_desconhecidos)
         v.addWidget(self.ck_extras)
         v.addWidget(detalhes)
-        v.addWidget(_rotulo("Título, artista, capa e todos os campos do editor são sempre mantidos.", "ajuda"))
+        v.addWidget(_rotulo("Título, artista, capa e todos os campos do editor são sempre mantidos. "
+                            "Em FLAC, Ogg e M4A só a última opção se aplica (ID3v1 e frames ID3 são coisa do MP3).",
+                            "ajuda"))
         v.addLayout(rodape)
         self._atualizar()
 

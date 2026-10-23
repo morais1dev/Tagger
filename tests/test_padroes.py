@@ -82,7 +82,8 @@ def test_renomear_e_trocar_nomes(fabrica_mp3):
     plano = planejar_renomeacao(_itens((a, "b"), (b, "a")), "{title}")   # troca: a->b e b->a
     assert all(item.valido for item in plano)
     feitos, falhas = executar_renomeacao(plano)
-    assert not falhas and len(feitos) == 2
+    assert not falhas, falhas
+    assert len(feitos) == 2
     assert b.read_bytes().endswith(b"A")                                  # o conteúdo de "a" agora é "b"
     assert sorted(p.name for p in a.parent.iterdir()) == ["a.mp3", "b.mp3"]
 
@@ -92,7 +93,8 @@ def test_so_maiusculas_mudam(fabrica_mp3):
     plano = planejar_renomeacao(_itens((a, "Musica")), "{title}")
     assert plano[0].valido
     feitos, falhas = executar_renomeacao(plano)
-    assert not falhas and [p.name for p in a.parent.iterdir()] == ["Musica.mp3"]
+    assert not falhas, falhas
+    assert [p.name for p in a.parent.iterdir()] == ["Musica.mp3"]
 
 
 def test_extensao_fica_minuscula(fabrica_mp3):
@@ -130,3 +132,21 @@ def test_tags_pelas_pastas():
     caminho = Path("musicas") / "Artista" / "Álbum (2001)" / "07 Faixa.mp3"
     assert tags_pelo_nome("%artist%/%album% (%year%)/%track% %title%", caminho) == {
         "artist": "Artista", "album": "Álbum", "date": "2001", "tracknumber": "7", "title": "Faixa"}
+
+
+def test_renomear_tenta_de_novo_se_o_windows_negar(tmp_path, monkeypatch):
+    import os
+    a = tmp_path / "a.mp3"
+    a.write_bytes(b"x")
+    real, negou = os.rename, []
+
+    def rename_instavel(origem, destino):
+        if not negou:
+            negou.append(1)
+            raise PermissionError("em uso")
+        return real(origem, destino)
+
+    monkeypatch.setattr(os, "rename", rename_instavel)
+    feitos, falhas = executar_renomeacao(planejar_renomeacao([(a, {"title": "B"})], "{title}"))
+    assert not falhas, falhas
+    assert feitos and (tmp_path / "B.mp3").exists()

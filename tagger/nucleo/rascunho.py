@@ -141,12 +141,14 @@ class Rascunho:
         self._avisar(mudou)
 
     def renomear(self, mapa):
-        """Arquivos renomeados no disco: as alterações pendentes vão junto para o caminho novo."""
-        for antigo, novo in mapa.items():
-            if antigo in self.tags:
-                self.tags[novo] = self.tags.pop(antigo)
-            if antigo in self.capas:
-                self.capas[novo] = self.capas.pop(antigo)
+        """Arquivos renomeados no disco: as alterações pendentes vão junto para o caminho novo.
+
+        Primeiro tira tudo, depois atribui: numa troca (A->B, B->A) ou num ciclo (A->B->C->A),
+        mover um a um sobrescreveria as pendências de um arquivo com as de outro.
+        """
+        for pendencias in (self.tags, self.capas):
+            movidas = {novo: pendencias.pop(antigo) for antigo, novo in mapa.items() if antigo in pendencias}
+            pendencias.update(movidas)
 
     def descartar(self, caminhos=None):
         alvo = self.caminhos() if caminhos is None else set(caminhos) & self.caminhos()

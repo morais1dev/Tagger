@@ -73,6 +73,29 @@ def imagem_do_mime(mime_data):
     return None
 
 
+def garantir_jpeg_ou_png(dados, mime):
+    """
+    Só JPEG e PNG servem de capa em todos os formatos (M4A/MP4 recusam o resto). Olha os bytes, não a
+    extensão: GIF/BMP/WebP... (ou um .jpg que na verdade é outra coisa) viram JPEG, com fundo branco
+    no lugar da transparência. Devolve (dados, mime); os originais se a imagem não abre.
+    """
+    if dados[:3] == b"\xff\xd8\xff":
+        return dados, "image/jpeg"
+    if dados[:8] == b"\x89PNG\r\n\x1a\n":
+        return dados, "image/png"
+    imagem = QImage.fromData(dados)
+    if imagem.isNull():
+        return dados, mime
+    if imagem.hasAlphaChannel():
+        fundo = QImage(imagem.size(), QImage.Format_RGB32)
+        fundo.fill(Qt.white)
+        pintor = QPainter(fundo)
+        pintor.drawImage(0, 0, imagem)
+        pintor.end()
+        imagem = fundo
+    return imagem_para_bytes(imagem.convertToFormat(QImage.Format_RGB32))
+
+
 def otimizar_imagem(dados, mime, lado_max):
     """
     Capa grande (lado > lado_max ou > 500 KB) vira JPEG de no máximo lado_max px.
@@ -490,6 +513,10 @@ class PainelEditor(QWidget):
         if not self._faixas:
             return
         if acao and acao[0] == "definir":
+            convertida = garantir_jpeg_ou_png(acao[1], acao[2])
+            if convertida[0] is not acao[1]:
+                self.aviso.emit("Capa convertida para JPEG (o formato original não é aceito em todos os arquivos).")
+            acao = ("definir", *convertida)
             dados, mime = otimizar_imagem(acao[1], acao[2], self.lado_max_capa)
             if len(dados) != len(acao[1]):
                 antes, depois = QImage.fromData(acao[1]), QImage.fromData(dados)
