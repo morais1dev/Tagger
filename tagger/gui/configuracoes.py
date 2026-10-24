@@ -6,13 +6,29 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel,
-    QPlainTextEdit, QPushButton, QRadioButton, QSizePolicy, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+    QLineEdit, QPlainTextEdit, QPushButton, QRadioButton, QSizePolicy, QSpinBox, QTabWidget, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from tagger.gui.config import DENSIDADES, PADROES
 from tagger.gui.tema import ACENTO_DO_TEMA, ACENTOS, acento_efetivo, familias_instaladas, temas_claros, temas_escuros
+from tagger.nucleo.credenciais import CHAVES_CONFIG
 
 AUTOMATICA = "Automática"
+
+TUTORIAL_CHAVES = (
+    "<p><b>Last.fm</b></p><ol>"
+    "<li>Entre na sua conta do Last.fm.</li>"
+    "<li>Abra <a href='https://www.last.fm/api/account/create'>last.fm/api/account/create</a>.</li>"
+    "<li>Preencha nome e descrição (a URL de retorno pode ficar em branco).</li>"
+    "<li>Copie a <b>API key</b> e cole aqui. Não use o \"shared secret\".</li></ol>"
+    "<p><b>Discogs</b></p><ol>"
+    "<li>Entre na sua conta do Discogs.</li>"
+    "<li>Vá em Configurações → Desenvolvedores "
+    "(<a href='https://www.discogs.com/settings/developers'>discogs.com/settings/developers</a>).</li>"
+    "<li>Clique em \"Gerar novo token\".</li>"
+    "<li>Copie o token e cole aqui. O token é pessoal: não compartilhe com ninguém.</li></ol>"
+)
 
 
 def _rotulo(texto, papel):
@@ -59,6 +75,7 @@ class DialogoConfiguracoes(QDialog):
         abas.addTab(self._aba_aparencia(), "Aparência")
         abas.addTab(self._aba_comportamento(), "Comportamento")
         abas.addTab(self._aba_tags(), "Tags")
+        abas.addTab(self._aba_servicos(), "Serviços online")
 
         btn_padroes = QPushButton("Restaurar padrões")
         btn_padroes.setProperty("tipo", "fantasma")
@@ -261,6 +278,70 @@ class DialogoConfiguracoes(QDialog):
         v.addWidget(self.tx_generos, 1)
         return w
 
+    def _aba_servicos(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(20, 20, 20, 20)
+        v.setSpacing(10)
+
+        v.addWidget(_rotulo("Suas chaves (opcional)", "secao"))
+        v.addWidget(_rotulo("Deixe em branco para usar a chave do Tagger. Use a sua se a busca parar de "
+                            "funcionar ou se você usa muito.", "ajuda"))
+        form = _formulario()
+        form.setRowWrapPolicy(QFormLayout.WrapAllRows)      # rótulos longos em cima do campo
+        self.ed_lastfm, linha_lastfm = self._campo_senha("lastfm_api_key", "Chave da API do Last.fm")
+        self.ed_discogs, linha_discogs = self._campo_senha("discogs_token", "Token pessoal do Discogs")
+        form.addRow("Chave da API do Last.fm (opcional)", linha_lastfm)
+        form.addRow("Token pessoal do Discogs (opcional)", linha_discogs)
+        v.addLayout(form)
+
+        v.addSpacing(8)
+        self.btn_tutorial = QToolButton()
+        self.btn_tutorial.setText("Como gerar a minha chave?")
+        self.btn_tutorial.setCheckable(True)
+        self.btn_tutorial.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btn_tutorial.setArrowType(Qt.RightArrow)
+        self.btn_tutorial.setAutoRaise(True)
+        self.tutorial = QLabel(TUTORIAL_CHAVES)
+        self.tutorial.setTextFormat(Qt.RichText)
+        self.tutorial.setOpenExternalLinks(True)
+        self.tutorial.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        self.tutorial.setWordWrap(True)
+        self.tutorial.setVisible(False)
+
+        def alternar_tutorial(aberto):
+            self.btn_tutorial.setArrowType(Qt.DownArrow if aberto else Qt.RightArrow)
+            self.tutorial.setVisible(aberto)
+
+        self.btn_tutorial.toggled.connect(alternar_tutorial)
+        v.addWidget(self.btn_tutorial)
+        v.addWidget(self.tutorial)
+        v.addStretch()
+        return w
+
+    def _campo_senha(self, chave, nome):
+        """QLineEdit em modo senha + botão Mostrar/Ocultar. Devolve (campo, layout da linha)."""
+        campo = QLineEdit()
+        campo.setEchoMode(QLineEdit.EchoMode.Password)
+        campo.setPlaceholderText("Em branco = chave do Tagger")
+        campo.setAccessibleName(nome)
+        campo.textChanged.connect(lambda texto: self._definir(chave, texto.strip()))
+        mostrar = QPushButton("Mostrar")
+        mostrar.setCheckable(True)
+        mostrar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        mostrar.setAccessibleName(f"Mostrar {nome.lower()}")
+
+        def alternar(visivel):
+            campo.setEchoMode(QLineEdit.EchoMode.Normal if visivel else QLineEdit.EchoMode.Password)
+            mostrar.setText("Ocultar" if visivel else "Mostrar")
+
+        mostrar.toggled.connect(alternar)
+        linha = QHBoxLayout()
+        linha.setSpacing(8)
+        linha.addWidget(campo, 1)
+        linha.addWidget(mostrar)
+        return campo, linha
+
     # ------------------------------------------------------------------ estado
     def _preencher(self):
         self._preenchendo = True
@@ -283,6 +364,8 @@ class DialogoConfiguracoes(QDialog):
         self.sp_lado_capa.setValue(int(c["lado_max_capa"]))
         self.sp_lado_capa.setEnabled(c["otimizar_capa"])
         self.tx_generos.setPlainText("\n".join(c["generos"]))
+        self.ed_lastfm.setText(c["lastfm_api_key"])
+        self.ed_discogs.setText(c["discogs_token"])
         self._atualizar_amostras()
         self._preenchendo = False
 
@@ -312,7 +395,7 @@ class DialogoConfiguracoes(QDialog):
         self.config[chave] = valor
         if chave in ("acento", "usar_escuro", "tema_escuro", "tema_claro"):
             self._atualizar_amostras()
-        self.mudou.emit(deepcopy(self.config))
+        self.mudou.emit(self.previa())
 
     def _ao_mudar_generos(self):
         linhas = [l.strip() for l in self.tx_generos.toPlainText().splitlines()]
@@ -326,9 +409,19 @@ class DialogoConfiguracoes(QDialog):
 
     def _restaurar_padroes(self):
         padroes_do_usuario = {k: v for k, v in self.config.items() if k.startswith(("padrao_", "recentes_"))}   # não aparecem aqui
-        self.config = deepcopy(PADROES) | padroes_do_usuario
+        chaves_do_usuario = {k: self.config[k] for k in CHAVES_CONFIG}    # restaurar a aparência não apaga a chave colada
+        self.config = deepcopy(PADROES) | padroes_do_usuario | chaves_do_usuario
         self._preencher()
-        self.mudou.emit(deepcopy(self.config))
+        self.mudou.emit(self.previa())
+
+    def previa(self):
+        """Config para a prévia ao vivo, com as credenciais ainda como estavam: a chave colada só
+        chega à janela principal no OK (credenciais_aceitas), nunca fica na sessão após um Cancelar."""
+        return deepcopy(self.config) | {k: self.original[k] for k in CHAVES_CONFIG}
+
+    def credenciais_aceitas(self):
+        """{chave: valor} das credenciais como estão no diálogo (para aplicar no OK)."""
+        return {k: self.config[k] for k in CHAVES_CONFIG}
 
     def reject(self):
         self.mudou.emit(deepcopy(self.original))    # volta tudo como estava
