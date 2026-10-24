@@ -20,7 +20,9 @@ from PySide6.QtCore import QObject, QSettings, QStandardPaths, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from tagger.nucleo.credenciais import FormatadorSemCredenciais, ocultar_credenciais
+from tagger.nucleo.credenciais import (
+    CHAVES_CONFIG, FormatadorSemCredenciais, credenciais_da_config, ocultar_credenciais,
+)
 
 log = logging.getLogger("tagger")
 
@@ -35,7 +37,7 @@ def pasta_de_dados():
 def credenciais_das_configuracoes():
     """Chaves que o usuário colou nas Configurações (lidas na hora, para ocultar no log)."""
     settings = QSettings("Tagger", "Tagger")
-    return tuple(str(settings.value(f"config/{chave}", "") or "") for chave in ("lastfm_api_key", "discogs_token"))
+    return credenciais_da_config({chave: str(settings.value(f"config/{chave}", "") or "") for chave in CHAVES_CONFIG})
 
 
 def configurar_log(versao):

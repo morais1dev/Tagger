@@ -25,7 +25,9 @@ def ambiente_limpo(monkeypatch):
 def pasta(tmp_path, monkeypatch):
     """Pasta do chaves.json de teste (o chaves.json real do projeto nunca é lido)."""
     monkeypatch.setattr(credenciais, "pasta_chaves", lambda: tmp_path)
-    return tmp_path
+    credenciais._avisar_uma_vez.cache_clear()
+    yield tmp_path
+    credenciais._avisar_uma_vez.cache_clear()
 
 
 def gravar(pasta, conteudo):
@@ -306,3 +308,31 @@ def test_gerar_chaves_avisa_sem_falhar_e_nao_imprime_valores(gerar_chaves, tmp_p
     assert "LASTFM_API_KEY" not in texto
     assert "valor-secreto" not in texto
     assert json.loads(destino.read_text(encoding="utf-8"))["discogs_secret"] == ""
+
+
+# --- estado para a GUI ---------------------------------------------------------------------------------
+
+def test_estado_servicos_sem_nada_traz_dicas(pasta):
+    estado = credenciais.estado_servicos({"lastfm_api_key": "", "discogs_token": "  "})
+    assert not estado["lastfm"].disponivel and "Configurações" in estado["lastfm"].dica
+    assert not estado["discogs"].disponivel and "token" in estado["discogs"].dica
+    assert credenciais.estado_servicos(None) == estado
+
+
+def test_estado_servicos_com_valores_da_config(pasta):
+    estado = credenciais.estado_servicos({"lastfm_api_key": "minha", "discogs_token": "meu"})
+    assert estado["lastfm"] == credenciais.EstadoServico(True, None)
+    assert estado["discogs"] == credenciais.EstadoServico(True, None)
+
+
+def test_estado_servicos_com_chaves_embutidas(pasta):
+    gravar(pasta, {"lastfm_api_key": "lf", "discogs_key": "k", "discogs_secret": "s"})
+    estado = credenciais.estado_servicos({})
+    assert estado["lastfm"].disponivel and estado["discogs"].disponivel
+
+
+def test_credenciais_da_config_vao_para_a_ocultacao(pasta):
+    config = {"lastfm_api_key": " chave-colada-0123456789 ", "discogs_token": "", "tema_escuro": "grafite"}
+    assert credenciais.credenciais_da_config(config) == ("chave-colada-0123456789",)
+    texto = ocultar_credenciais("falhou com chave-colada-0123456789", credenciais.credenciais_da_config(config))
+    assert texto == "falhou com ***"
