@@ -1,0 +1,218 @@
+"""
+Peças comuns aos clientes do Discogs e do Last.fm (sem Qt, só urllib).
+
+- `ocultar`: o ÚNICO ponto que limpa credenciais de mensagens de erro de rede;
+- `LimitadorJanela`: no máximo N requisições numa janela de tempo deslizante;
+- `Cache`: respostas guardadas pelo tempo que os cabeçalhos HTTP permitem, com teto de tamanho;
+- `abrir_sem_vazar`: urlopen que não repassa o cabeçalho Authorization num redirecionamento
+  para outro host.
+
+Nenhum desses serviços fornece capas para o Tagger: as capas vêm só do Cover Art Archive
+(ver busca.py). Por isso nada aqui baixa imagens, e os clientes nem expõem as URLs delas.
+"""
+
+import email.utils
+import hashlib
+import json
+import os
+import re
+import threading
+import time
+import urllib.parse
+import urllib.request
+from collections import OrderedDict, deque
+from pathlib import Path
+
+try:   # módulo do item de credenciais (outro branch); sem ele, vale só a limpeza local abaixo
+    from tagger.nucleo.credenciais import ocultar_credenciais as _ocultar_credenciais
+except ImportError:      # pragma: no cover - depende do merge
+    _ocultar_credenciais = None
+
+MB = 1024 * 1024
+
+_PADROES_SEGREDO = [
+    re.compile(r"(\b(?:api_key|token|key|secret|api_sig|sk)=)[^&\s,;\"']+", re.IGNORECASE),
+    re.compile(r"(Authorization:\s*)[^\r\n]+", re.IGNORECASE),
+]
+
+
+def ocultar(texto, *conhecidas):
+    """Troca por *** as credenciais do texto: as de credenciais.py (se houver), os padrões
+    api_key=/token=/key=/secret= e qualquer valor de `conhecidas` que apareça literalmente."""
+    texto = str(texto)
+    if _ocultar_credenciais is not None:
+        texto = _ocultar_credenciais(texto, conhecidas=tuple(c for c in conhecidas if c))
+    for valor in conhecidas:
+        if valor and len(valor.strip()) >= 4:
+            texto = texto.replace(valor, "***")
+            texto = texto.replace(urllib.parse.quote(valor, safe=""), "***")
+    for padrao in _PADROES_SEGREDO:
+        texto = padrao.sub(r"\1***", texto)
+    return texto
+
+
+def erro_busca(mensagem, detalhe):
+    """ErroBusca com a mensagem para o usuário e, em `detalhe`, o erro técnico já sem credenciais
+    (o que pode ir para o tagger.log). Quem levanta usa `from None`: a exceção original, que
+    costuma ter a URL completa, não fica encadeada no traceback."""
+    from tagger.nucleo.busca import ErroBusca
+    erro = ErroBusca(mensagem)
+    erro.detalhe = detalhe
+    return erro
+
+
+class LimitadorJanela:
+    """No máximo `maximo` requisições em qualquer intervalo de `janela` segundos, com um
+    espaçamento mínimo entre elas. `bloquear(s)` faz todos esperarem (ex.: depois de um 429)."""
+
+    def __init__(self, maximo, janela, intervalo=0.0, dormir=time.sleep, relogio=time.monotonic):
+        self.maximo, self.janela, self.intervalo = maximo, janela, intervalo
+        self._dormir, self._relogio = dormir, relogio
+        self._feitas = deque()
+        self._livre_em = 0.0
+        self._trava = threading.Lock()
+
+    def esperar(self):
+        with self._trava:
+            agora = self._relogio()
+            espera = self._livre_em - agora
+            if self._feitas:
+                espera = max(espera, self.intervalo - (agora - self._feitas[-1]))
+            while self._feitas and agora - self._feitas[0] >= self.janela:
+                self._feitas.popleft()
+            if len(self._feitas) >= self.maximo:
+                espera = max(espera, self.janela - (agora - self._feitas[-self.maximo]))
+            if espera > 0:
+                self._dormir(espera)
+            self._feitas.append(self._relogio())
+
+    def bloquear(self, segundos):
+        with self._trava:
+            self._livre_em = max(self._livre_em, self._relogio() + segundos)
+
+
+def validade(cabecalhos, agora=None):
+    """Segundos que a resposta pode ficar em cache segundo os cabeçalhos HTTP (0 = não guardar).
+    Cache-Control (no-store/no-cache/private/max-age) tem prioridade sobre Expires; Age é descontado."""
+    cabecalhos = {k.lower(): v for k, v in (cabecalhos or {}).items()}
+    controle = (cabecalhos.get("cache-control") or "").lower()
+    diretivas = [d.strip() for d in controle.split(",") if d.strip()]
+    if any(d in ("no-store", "no-cache") or d.startswith("no-cache=") for d in diretivas):
+        return 0
+    idade = _inteiro(cabecalhos.get("age"))
+    for d in diretivas:
+        if d.startswith("max-age="):
+            return max(0, _inteiro(d[8:].strip('"')) - idade)
+    if "expires" in cabecalhos:
+        try:
+            expira = email.utils.parsedate_to_datetime(cabecalhos["expires"]).timestamp()
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return 0                       # Expires inválido (ex.: "0") = já expirou
+        return max(0, int(expira - (agora if agora is not None else time.time())))
+    return 0
+
+
+def _inteiro(texto):
+    try:
+        return max(0, int(str(texto).strip()))
+    except (TypeError, ValueError):
+        return 0
+
+
+class Cache:
+    """Respostas por chave, cada uma com prazo. Em memória ou numa pasta (pasta=None: só memória).
+    `teto_bytes` limita o total (os mais antigos saem primeiro) e `teto_segundos` o prazo de cada uma.
+    A chave nunca deve conter credencial: na pasta ela vira só um hash."""
+
+    def __init__(self, teto_bytes, teto_segundos=None, pasta=None, relogio=time.time):
+        self.teto_bytes, self.teto_segundos = teto_bytes, teto_segundos
+        self.pasta = Path(pasta) if pasta else None
+        self._relogio = relogio
+        self._memoria = OrderedDict()      # chave -> (expira, corpo)
+        self._trava = threading.Lock()
+
+    def _arquivo(self, chave):
+        return self.pasta / (hashlib.sha256(chave.encode("utf-8")).hexdigest() + ".json")
+
+    def obter(self, chave):
+        agora = self._relogio()
+        with self._trava:
+            if self.pasta is None:
+                item = self._memoria.get(chave)
+                if item is None:
+                    return None
+                if item[0] <= agora:
+                    del self._memoria[chave]
+                    return None
+                self._memoria.move_to_end(chave)
+                return item[1]
+            arquivo = self._arquivo(chave)
+            try:
+                dados = json.loads(arquivo.read_text("utf-8"))
+                if dados["expira"] > agora:
+                    return dados["corpo"].encode("utf-8")
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                pass
+            try:
+                arquivo.unlink()
+            except OSError:
+                pass
+            return None
+
+    def guardar(self, chave, corpo, segundos):
+        if self.teto_segundos is not None:
+            segundos = min(segundos, self.teto_segundos)
+        if segundos <= 0 or len(corpo) > self.teto_bytes:
+            return
+        expira = self._relogio() + segundos
+        with self._trava:
+            if self.pasta is None:
+                self._memoria[chave] = (expira, corpo)
+                self._memoria.move_to_end(chave)
+                while sum(len(c) for _e, c in self._memoria.values()) > self.teto_bytes:
+                    self._memoria.popitem(last=False)
+                return
+            try:
+                self.pasta.mkdir(parents=True, exist_ok=True)
+                self._arquivo(chave).write_text(
+                    json.dumps({"expira": expira, "corpo": corpo.decode("utf-8")}), "utf-8")
+                self._podar()
+            except (OSError, UnicodeDecodeError):
+                pass                      # cache é só otimização: falha não derruba a busca
+
+    def _podar(self):
+        arquivos = []
+        for arquivo in self.pasta.glob("*.json"):
+            try:
+                info = arquivo.stat()
+                arquivos.append((info.st_mtime, info.st_size, arquivo))
+            except OSError:
+                pass
+        total = sum(tamanho for _m, tamanho, _a in arquivos)
+        for _m, tamanho, arquivo in sorted(arquivos, key=lambda a: a[0]):
+            if total <= self.teto_bytes:
+                break
+            try:
+                os.remove(arquivo)
+                total -= tamanho
+            except OSError:
+                pass
+
+
+class _RedirecionamentoSeguro(urllib.request.HTTPRedirectHandler):
+    """O urllib repassa o Authorization num redirecionamento; para outro host, tira."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        novo = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if novo is not None and urllib.parse.urlsplit(newurl).hostname != urllib.parse.urlsplit(req.full_url).hostname:
+            for nome in list(novo.headers):
+                if nome.lower() == "authorization":
+                    del novo.headers[nome]
+        return novo
+
+
+_OPENER = urllib.request.build_opener(_RedirecionamentoSeguro)
+
+
+def abrir_sem_vazar(pedido, timeout=None):
+    return _OPENER.open(pedido, timeout=timeout)
