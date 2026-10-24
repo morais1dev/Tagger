@@ -2,6 +2,11 @@
 
 All notable changes to Tagger are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Group by album** (Settings → Behavior, off by default): with more than one album loaded, the list shows a header per album ("Album — Album artist, year", with the track count) and orders the tracks by disc and track. Selection, filter, in-cell editing and the row actions work as before; the header is not a track.
+
 ## [2.1.0] — 2026-10-23
 
 ### Added

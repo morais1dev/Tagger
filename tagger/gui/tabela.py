@@ -4,13 +4,15 @@ edição direto na célula (vira alteração pendente) e desenho das colunas esp
 """
 
 from PySide6.QtCore import (
-    QAbstractTableModel, QItemSelection, QItemSelectionModel, QModelIndex, QRectF, QSortFilterProxyModel, Qt, Signal,
+    QAbstractTableModel, QItemSelection, QItemSelectionModel, QModelIndex, QRectF, QSortFilterProxyModel, Qt, QTimer,
+    Signal,
 )
 from PySide6.QtGui import QAction, QColor, QCursor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView, QHeaderView, QMenu, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableView,
 )
 
+from tagger.nucleo.agrupar import chave_grupo, mais_de_um_album, ordem_faixa, titulo_cabecalho
 from tagger.nucleo.metadata import CAMPOS
 
 # (chave, título, largura inicial ou None = estica, visível por padrão)
@@ -256,17 +258,65 @@ class ModeloFaixas(QAbstractTableModel):
         return bool(self.ao_editar_celula(faixa, chave, str(valor)))
 
 
+CAMPOS_GRUPO = ("album", "albumartist", "artist", "date", "discnumber", "tracknumber")
+
+
 class FiltroFaixas(QSortFilterProxyModel):
-    """Filtra por título, artista, álbum ou nome do arquivo e ordena pelas chaves certas."""
+    """Filtra por título, artista, álbum ou nome do arquivo e ordena pelas chaves certas.
+    Com o agrupamento ligado, os álbuns ficam juntos (em ordem) e a coluna ordenada vale dentro de cada um."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._texto = ""
+        self.agrupar = False
+        self._cache_tags = {}
         self.setSortRole(PAPEL_ORDEM)
+        # editar álbum/disco/faixa muda o grupo da linha: reordena depois que o Qt terminar a edição
+        self._timer_regrupar = QTimer(self, singleShot=True, interval=0)
+        self._timer_regrupar.timeout.connect(self.invalidate)
+
+    def setSourceModel(self, modelo):
+        # o cache é limpo antes de o proxy reagir às mudanças da origem (a conexão do proxy vem depois)
+        for sinal in (modelo.dataChanged, modelo.rowsInserted, modelo.rowsRemoved, modelo.modelReset,
+                      modelo.layoutChanged):
+            sinal.connect(self._cache_tags.clear)
+        super().setSourceModel(modelo)
+        modelo.dataChanged.connect(lambda *_: self.agrupar and self._timer_regrupar.start())
 
     def definir_texto(self, texto):
         self._texto = texto.strip().casefold()
         self.invalidateFilter()
+
+    def definir_agrupar(self, ligado):
+        if ligado != self.agrupar:
+            self.agrupar = ligado
+            self.invalidate()
+
+    def tags_da_linha(self, linha):
+        """Tags (com o rascunho aplicado) da linha de origem, só os campos usados no agrupamento."""
+        tags = self._cache_tags.get(linha)
+        if tags is None:
+            modelo = self.sourceModel()
+            faixa = modelo.faixas[linha]
+            tags = self._cache_tags[linha] = {campo: modelo.rascunho.valor(faixa, campo) for campo in CAMPOS_GRUPO}
+        return tags
+
+    def lessThan(self, esquerda, direita):
+        if not self.agrupar:
+            return super().lessThan(esquerda, direita)
+        a, b = self.tags_da_linha(esquerda.row()), self.tags_da_linha(direita.row())
+        ga, gb = chave_grupo(a), chave_grupo(b)
+        if ga != gb:
+            # sem álbum vai para o fim; a ordem dos álbuns não inverte com a coluna em ordem decrescente
+            menor = (ga == ("", ""), ga) < (gb == ("", ""), gb)
+            return menor if self.sortOrder() == Qt.AscendingOrder else not menor
+        if CHAVES[self.sortColumn()] == "tracknumber":
+            return ordem_faixa(a) < ordem_faixa(b)
+        if super().lessThan(esquerda, direita):
+            return True
+        if super().lessThan(direita, esquerda):
+            return False
+        return ordem_faixa(a) < ordem_faixa(b)
 
     def filterAcceptsRow(self, linha, pai):
         if not self._texto:
@@ -286,6 +336,8 @@ class DelegadoTabela(QStyledItemDelegate):
         super().__init__(parent)
         self.modelo = modelo
         self.linha_hover = -1          # linha (da tela) sob o mouse
+        self.cabecalhos = {}           # linha (da tela) -> (título, nº de faixas) do álbum que começa nela
+        self.altura_cabecalho = 0      # faixa extra no topo dessas linhas, onde o cabeçalho é desenhado
 
     def initStyleOption(self, opcao, indice):
         super().initStyleOption(opcao, indice)
@@ -303,7 +355,18 @@ class DelegadoTabela(QStyledItemDelegate):
             tinta.setAlpha(26)
             pintor.fillRect(opcao.rect, tinta)
 
+    def _sem_cabecalho(self, opcao, indice):
+        """Cópia da opção sem a faixa do topo reservada ao cabeçalho do álbum (se a linha tiver um)."""
+        if indice.row() in self.cabecalhos:
+            opcao = QStyleOptionViewItem(opcao)
+            opcao.rect.setTop(opcao.rect.top() + self.altura_cabecalho)
+        return opcao
+
+    def updateEditorGeometry(self, editor, opcao, indice):
+        super().updateEditorGeometry(editor, self._sem_cabecalho(opcao, indice), indice)
+
     def paint(self, pintor, opcao, indice):
+        opcao = self._sem_cabecalho(opcao, indice)
         chave = CHAVES[indice.column()]
         self._pintar_fundo(pintor, opcao, indice, chave)
         if chave not in ("capa", "estado"):
@@ -357,6 +420,15 @@ class TabelaFaixas(QTableView):
         self.delegado = DelegadoTabela(modelo, self)
         self.setItemDelegate(self.delegado)
         self._auto_escondidas = set()      # colunas escondidas só por falta de espaço
+        self._altura_linha = 34
+        self._ordem_automatica = False     # a ordenação por Nº foi posta pelo agrupamento, não pelo usuário
+        self._timer_grupos = QTimer(self, singleShot=True, interval=0)
+        self._timer_grupos.timeout.connect(self._atualizar_grupos)
+        self._ordem_anterior = (-1, Qt.AscendingOrder)   # ordenação do usuário, guardada enquanto agrupa
+        self._mudando_ordem = False
+        for sinal in (filtro.rowsInserted, filtro.rowsRemoved, filtro.modelReset, filtro.dataChanged):
+            sinal.connect(lambda *_: self._timer_grupos.start())
+        filtro.layoutChanged.connect(lambda *_: self._atualizar_grupos())     # síncrono: sem piscar ao reordenar
 
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -389,6 +461,7 @@ class TabelaFaixas(QTableView):
         # começa na ordem em que os arquivos foram carregados (sem coluna ordenada)
         cabecalho.setSortIndicator(-1, Qt.AscendingOrder)
         self.setSortingEnabled(True)
+        cabecalho.sortIndicatorChanged.connect(self._ordem_mudou)
 
     # ----- colunas -----
     def colunas_padrao(self):
@@ -472,8 +545,119 @@ class TabelaFaixas(QTableView):
         self._ajustar_colunas()
 
     def definir_altura(self, altura_linha, altura_cabecalho):
+        self._altura_linha = altura_linha
+        self.delegado.altura_cabecalho = max(24, altura_linha - 2)
         self.verticalHeader().setDefaultSectionSize(altura_linha)
         self.horizontalHeader().setFixedHeight(altura_cabecalho)
+        self._atualizar_grupos()
+
+    # ----- agrupar por álbum -----
+    def definir_agrupar(self, ligado):
+        """Liga/desliga os cabeçalhos de álbum. Ligado, a lista fica ordenada por álbum, disco e faixa."""
+        ligado = bool(ligado)
+        filtro = self.model()
+        if ligado == filtro.agrupar:
+            return
+        cabecalho = self.horizontalHeader()
+        if ligado:
+            # dentro de cada álbum a ordem é disco > faixa: a ordenação do usuário volta ao desligar
+            self._ordem_anterior = (cabecalho.sortIndicatorSection(), cabecalho.sortIndicatorOrder())
+            self._ordem_automatica = True
+            self._definir_ordem(CHAVES.index("tracknumber"), Qt.AscendingOrder)
+        elif self._ordem_automatica:
+            self._definir_ordem(*self._ordem_anterior)
+        if not ligado:
+            self._ordem_automatica = False
+        filtro.definir_agrupar(ligado)
+        self._atualizar_grupos()
+
+    def _definir_ordem(self, coluna, ordem):
+        self._mudando_ordem = True
+        try:
+            self.horizontalHeader().setSortIndicator(coluna, ordem)
+        finally:
+            self._mudando_ordem = False
+
+    def _ordem_mudou(self, *_):
+        if not self._mudando_ordem:
+            self._ordem_automatica = False      # o usuário escolheu a ordem: não desfazer ao desligar
+
+    def _limites_grupo(self, linha):
+        """Primeira e última linha (da tela) do álbum que contém `linha`."""
+        inicios = sorted(self.delegado.cabecalhos)
+        inicio = max((i for i in inicios if i <= linha), default=0)
+        fim = min((i for i in inicios if i > linha), default=self.model().rowCount()) - 1
+        return inicio, fim
+
+    def _no_cabecalho(self, evento):
+        y = evento.position().toPoint().y()
+        linha = self.rowAt(y)
+        return linha if linha in self.delegado.cabecalhos and             y - self.rowViewportPosition(linha) < self.delegado.altura_cabecalho else -1
+
+    def mousePressEvent(self, evento):
+        linha = self._no_cabecalho(evento)
+        if linha < 0:
+            return super().mousePressEvent(evento)
+        if evento.button() == Qt.LeftButton:            # clicar no cabeçalho seleciona o álbum inteiro
+            inicio, fim = self._limites_grupo(linha)
+            filtro = self.model()
+            self.selecionar_linhas([filtro.mapToSource(filtro.index(i, 0)).row() for i in range(inicio, fim + 1)])
+
+    def mouseDoubleClickEvent(self, evento):
+        if self._no_cabecalho(evento) < 0:
+            super().mouseDoubleClickEvent(evento)
+
+    def _atualizar_grupos(self):
+        """Recalcula onde começa cada álbum (só com mais de um álbum carregado) e a altura dessas linhas."""
+        filtro = self.model()
+        modelo = filtro.sourceModel()
+        cabecalhos = {}
+        if filtro.agrupar and mais_de_um_album(filtro.tags_da_linha(i) for i in range(len(modelo.faixas))):
+            grupo, tags = None, []
+            for linha in range(filtro.rowCount()):
+                dados = filtro.tags_da_linha(filtro.mapToSource(filtro.index(linha, 0)).row())
+                if chave_grupo(dados) != grupo:
+                    grupo, tags = chave_grupo(dados), []
+                    cabecalhos[linha] = tags
+                tags.append(dados)
+            cabecalhos = {linha: (titulo_cabecalho(t), len(t)) for linha, t in cabecalhos.items()}
+        self.delegado.cabecalhos = cabecalhos
+        extra = self.delegado.altura_cabecalho
+        for linha in range(filtro.rowCount()):
+            altura = self._altura_linha + (extra if linha in cabecalhos else 0)
+            if self.rowHeight(linha) != altura:
+                self.setRowHeight(linha, altura)
+        self.viewport().update()
+
+    def paintEvent(self, evento):
+        super().paintEvent(evento)
+        cabecalhos, cores = self.delegado.cabecalhos, self.delegado.modelo.cores
+        if not cabecalhos or not cores:
+            return
+        pintor = QPainter(self.viewport())
+        altura = self.delegado.altura_cabecalho
+        largura = self.viewport().width()
+        negrito = QFont(self.font())
+        negrito.setBold(True)
+        for linha, (titulo, total) in cabecalhos.items():
+            y = self.rowViewportPosition(linha)
+            if y + altura < evento.rect().top() or y > evento.rect().bottom():
+                continue
+            pintor.fillRect(0, y, largura, altura, QColor(cores["surface2"]))
+            pintor.fillRect(0, y, 3, altura, QColor(cores["accent"]))
+            contagem = f"{total} faixa" + ("" if total == 1 else "s")
+            pintor.setFont(self.font())
+            pintor.setPen(QColor(cores["muted"]))
+            caixa = pintor.boundingRect(0, y, largura - 10, altura, Qt.AlignRight | Qt.AlignVCenter, contagem)
+            pintor.drawText(caixa, Qt.AlignRight | Qt.AlignVCenter, contagem)
+            disponivel = max(0, caixa.left() - 24)
+            pintor.setFont(negrito)
+            pintor.setPen(QColor(cores["text"]))
+            elidido = pintor.fontMetrics().elidedText(titulo, Qt.ElideRight, disponivel)
+            pintor.drawText(14, y, disponivel, altura, Qt.AlignLeft | Qt.AlignVCenter, elidido)
+            pintor.setPen(QColor(cores["line"]))
+            pintor.drawLine(0, y + altura - 1, largura, y + altura - 1)
+        pintor.end()
 
     # ----- hover da linha inteira -----
     def _definir_hover(self, linha):
