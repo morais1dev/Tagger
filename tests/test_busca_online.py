@@ -136,6 +136,17 @@ def test_erro_mostrado_sem_credencial(app):
     assert "SEGREDO" not in dlg.estado.text()
     dlg.reject()
 
+    class VazaLiteral(Vaza):
+        def buscar(self, *termos):
+            raise ErroBusca("falhou com tokenColado0123456789abcdef no meio")
+
+    dlg = dialogo({"discogs": VazaLiteral()}, fonte_inicial="discogs",
+                  config={"discogs_token": "tokenColado0123456789abcdef"})
+    dlg.buscar()
+    esperar(app, lambda: "falhou" in dlg.estado.text())
+    assert "tokenColado" not in dlg.estado.text()
+    dlg.reject()
+
 
 def test_link_inseguro_vira_texto():
     from tagger.gui.busca_online import _link
@@ -153,6 +164,6 @@ def test_criar_fontes_sem_credencial(monkeypatch, tmp_path):
     from tagger.gui import busca_online
     monkeypatch.setattr(busca_online.credenciais, "lastfm_api_key", lambda v: None)
     monkeypatch.setattr(busca_online.credenciais, "discogs_authorization", lambda v: "Discogs token=" + v if v else None)
-    fontes = busca_online.criar_fontes(("", "tok"), tmp_path)
+    fontes = busca_online.criar_fontes({"lastfm_api_key": "", "discogs_token": "tok"}, tmp_path)
     assert fontes["lastfm"] is None and fontes["discogs"] is not None
     assert isinstance(fontes["musicbrainz"].cliente, busca.ClienteMusicBrainz)

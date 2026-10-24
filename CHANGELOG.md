@@ -5,6 +5,10 @@ All notable changes to Tagger are listed here. Versions follow [Semantic Version
 ## [Unreleased]
 
 ### Added
+- **Online search window** ("Buscar online" button in the top bar, `Ctrl+Shift+M` or the right-click menu): choose **MusicBrainz**, **Discogs** or **Last.fm**, see a before/after preview of every field and send the result to the pending changes (nothing is written until you save).
+  - **Discogs** fills year, track/disc, album artist and label, and is good for private pressings and rare editions. Vinyl positions such as `A1`/`B2` become track and disc numbers. Discogs can also be used automatically when MusicBrainz finds nothing.
+  - **Last.fm** keeps the tags as they are scrobbled: canonical names, the track list and the album version you pick by playcount ("Deluxe", "Remastered"…).
+  - Covers still come only from the Cover Art Archive. A service without a key is disabled, with a tip explaining how to set one up. The window shows the attribution and links each service asks for, and **About** (`F1`) shows the Discogs notice.
 - **Label** ("Gravadora") tag for MP3 (`TPUB`), FLAC/Ogg (`ORGANIZATION`, also reads `LABEL`) and M4A (`LABEL` free-form atom, as Picard writes it). It shows in the editor panel and as an optional column, and works with pending changes.
 - **Group by album** (Settings → Behavior, off by default): with more than one album loaded, the list shows a header per album ("Album — Album artist, year", with the track count) and orders the tracks by disc and track. Selection, filter, in-cell editing and the row actions work as before; the header is not a track.
 - **Your own API keys, optional** (Settings → Online services): paste a Last.fm API key or a Discogs personal token to use instead of the keys built into Tagger, for example if the search stops working or you use it a lot. Fields are hidden like passwords and come with a short "How do I get my key?" guide. Keys are never written to `tagger.log` or shown in error details.

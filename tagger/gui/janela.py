@@ -30,7 +30,7 @@ from tagger.gui.config import carregar_config, salvar_config
 from tagger.gui.configuracoes import DialogoConfiguracoes
 from tagger.gui.busca_online import DialogoBuscaOnline
 from tagger.gui.editor import PainelEditor, garantir_jpeg_ou_png
-from tagger.gui.erros import configurar_log, credenciais_das_configuracoes, instalar_tratamento_de_erros
+from tagger.gui.erros import configurar_log, instalar_tratamento_de_erros
 from tagger.gui.icones import icone, icone_app, pixmap
 from tagger.gui.limpeza import DialogoLimpeza
 from tagger.gui.organizar import DialogoOrganizar
@@ -1264,8 +1264,8 @@ class JanelaPrincipal(QMainWindow):
             return
         if self._ocupado():
             return
-        dialogo = DialogoBuscaOnline(selecionadas, self, valor=self.rascunho.valor,
-                                     credenciais=credenciais_das_configuracoes())
+        dialogo = DialogoBuscaOnline(selecionadas, self, valor=self.rascunho.valor, config=self.config,
+                                     estados=self.estado_servicos())
         if dialogo.exec() != QDialog.Accepted:
             return
         resultado = dialogo.resultado()

@@ -1,16 +1,16 @@
 """Janela "Buscar tags online": MusicBrainz, Discogs ou Last.fm, com prévia antes/depois.
 
 Uso (igual ao DialogoBusca antigo, o resultado é o mesmo busca.Resultado):
-    dlg = DialogoBuscaOnline(faixas, parent, valor=rascunho.valor, credenciais=(lastfm, discogs))
+    dlg = DialogoBuscaOnline(faixas, parent, valor=rascunho.valor, config=config, estados=estado_servicos(config))
     if dlg.exec():
         resultado = dlg.resultado()
         rascunho.definir_por_faixa(resultado.alteracoes)
         if resultado.capa:
             rascunho.definir_capa(resultado.caminhos_capa, resultado.acao_capa)
 
-`credenciais` = (config/lastfm_api_key, config/discogs_token) das Configurações; vazias = chave
-embutida ou variável de ambiente (credenciais.py). Sem nenhuma, o botão daquele serviço fica
-desabilitado com uma dica.
+`config` = as Configurações (lastfm_api_key, discogs_token); vazias = chave embutida ou variável de
+ambiente (credenciais.py). `estados` = credenciais.estado_servicos(config): serviço indisponível fica
+com o botão desabilitado e a dica que vem de lá.
 
 Regras: a rede roda fora da thread da GUI; mensagens de erro passam por ocultar_credenciais;
 capa só do Cover Art Archive (só a fonte MusicBrainz oferece capa); atribuições do Last.fm e do
@@ -171,11 +171,11 @@ class FonteLastfm:
         return f"{html.escape(texto)} · " + " · ".join(partes)
 
 
-def criar_fontes(credenciais_config=("", ""), pasta_cache=None):
-    """{nome: fonte ou None (sem credencial)} a partir do que está nas Configurações."""
-    chave_lastfm, token_discogs = credenciais_config
-    api_key = credenciais.lastfm_api_key(chave_lastfm)
-    authorization = credenciais.discogs_authorization(token_discogs)
+def criar_fontes(config=None, pasta_cache=None):
+    """{nome: fonte ou None (sem credencial)} a partir do dicionário das Configurações."""
+    config = config or {}
+    api_key = credenciais.lastfm_api_key(config.get("lastfm_api_key"))
+    authorization = credenciais.discogs_authorization(config.get("discogs_token"))
     return {
         MUSICBRAINZ: FonteMusicBrainz(busca.ClienteMusicBrainz()),
         DISCOGS: FonteDiscogs(discogs.ClienteDiscogs(authorization)) if authorization else None,
@@ -219,15 +219,15 @@ class Trabalhador(QThread):
 
 
 class DialogoBuscaOnline(QDialog):
-    def __init__(self, faixas, parent=None, valor=None, credenciais=("", ""), fontes=None, fonte_inicial=MUSICBRAINZ,
+    def __init__(self, faixas, parent=None, valor=None, config=None, fontes=None, fonte_inicial=MUSICBRAINZ,
                  estados=None):
-        """`estados`: {"lastfm"|"discogs": objeto com .disponivel e .dica} (credenciais.estado_servicos),
-        quando a janela principal já souber; senão vale ter ou não credencial (fontes[nome] is None)."""
+        """`estados`: {"lastfm"|"discogs": EstadoServico(disponivel, dica)} (JanelaPrincipal.estado_servicos());
+        sem ele vale ter ou não credencial (fontes[nome] is None)."""
         super().__init__(parent)
         self.faixas = list(faixas)
         self._valor = valor or (lambda faixa, campo: faixa.tags.get(campo, ""))
-        self._conhecidas = tuple(c for c in credenciais if c)
-        self._fontes = dict(fontes if fontes is not None else criar_fontes(credenciais, pasta_cache_lastfm()))
+        self._conhecidas = credenciais.credenciais_da_config(config)      # ocultadas em toda mensagem de erro
+        self._fontes = dict(fontes if fontes is not None else criar_fontes(config, pasta_cache_lastfm()))
         self._dicas_sem_chave = dict(SEM_CHAVE)
         for nome, estado in (estados or {}).items():
             if nome in self._fontes and not estado.disponivel:
