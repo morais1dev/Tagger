@@ -27,9 +27,9 @@ from tagger import __version__
 from tagger.gui import tema
 from tagger.gui.config import carregar_config, salvar_config
 from tagger.gui.configuracoes import DialogoConfiguracoes
-from tagger.gui.busca import DialogoBusca
+from tagger.gui.busca_online import DialogoBuscaOnline
 from tagger.gui.editor import PainelEditor, garantir_jpeg_ou_png
-from tagger.gui.erros import configurar_log, instalar_tratamento_de_erros
+from tagger.gui.erros import configurar_log, credenciais_das_configuracoes, instalar_tratamento_de_erros
 from tagger.gui.icones import icone, icone_app, pixmap
 from tagger.gui.limpeza import DialogoLimpeza
 from tagger.gui.organizar import DialogoOrganizar
@@ -347,8 +347,13 @@ class JanelaPrincipal(QMainWindow):
         self.btn_adicionar.setToolTip("Adicionar arquivos")
         self.btn_adicionar.setAccessibleName("Adicionar arquivos")
         self.btn_adicionar.clicked.connect(lambda: self.adicionar_arquivos())
+        self.btn_online = QPushButton("Buscar online")
+        self.btn_online.setToolTip("Buscar tags online das faixas selecionadas: MusicBrainz, Discogs ou Last.fm (Ctrl+Shift+M)")
+        self.btn_online.setAccessibleName("Buscar online")
+        self.btn_online.clicked.connect(lambda: self.buscar_tags_online())
         h.addWidget(self.btn_abrir)
         h.addWidget(self.btn_adicionar)
+        h.addWidget(self.btn_online)
 
         separador = QFrame(objectName="sep")
         separador.setFixedSize(1, 20)
@@ -403,7 +408,8 @@ class JanelaPrincipal(QMainWindow):
         if (compacta, lado) == getattr(self, "_estado_barra", None):
             return
         self._estado_barra = (compacta, lado)
-        for botao, texto in ((self.btn_abrir, "Abrir pasta"), (self.btn_adicionar, "Adicionar arquivos")):
+        for botao, texto in ((self.btn_abrir, "Abrir pasta"), (self.btn_adicionar, "Adicionar arquivos"),
+                             (self.btn_online, "Buscar online")):
             if compacta:
                 botao.setText("")
                 botao.setFixedSize(lado, lado)
@@ -511,6 +517,7 @@ class JanelaPrincipal(QMainWindow):
         self._nova_acao("Configurações", ["Ctrl+,"], self.abrir_configuracoes)
         self._nova_acao("Mostrar/esconder o editor", ["Ctrl+E"], self.alternar_painel)
         self._nova_acao("Esc", ["Escape"], self._ao_escape)
+        self._nova_acao("Sobre o Tagger", ["F1"], self.mostrar_sobre)
         # ações das linhas (também aparecem no menu de clique direito)
         self.acao_recarregar = self._nova_acao("Recarregar do disco", ["F5"], self.recarregar)
         self.acao_numerar = self._nova_acao("Numerar faixas", ["Ctrl+Shift+N"], self.numerar_faixas)
@@ -578,6 +585,7 @@ class JanelaPrincipal(QMainWindow):
         self.logo.setPixmap(pixmap("musica", cores["on_accent"], 15, espessura=2.4))
         self.btn_abrir.setIcon(icone("pasta", cores["text"]))
         self.btn_adicionar.setIcon(icone("arquivo+", cores["text"]))
+        self.btn_online.setIcon(icone("busca", cores["text"]))
         self.btn_painel.setIcon(icone("painel", cores["muted"]))
         self.btn_desfazer.setIcon(icone("desfazer", cores["muted"]))
         self.btn_refazer.setIcon(icone("refazer", cores["muted"]))
@@ -1239,9 +1247,13 @@ class JanelaPrincipal(QMainWindow):
 
     def buscar_tags_online(self):
         selecionadas = self._faixas_selecionadas()
-        if not selecionadas or self._ocupado():
+        if not selecionadas:
+            self.avisar("Selecione as faixas que quer buscar online.")
             return
-        dialogo = DialogoBusca(selecionadas, self, valor=self.rascunho.valor)
+        if self._ocupado():
+            return
+        dialogo = DialogoBuscaOnline(selecionadas, self, valor=self.rascunho.valor,
+                                     credenciais=credenciais_das_configuracoes())
         if dialogo.exec() != QDialog.Accepted:
             return
         resultado = dialogo.resultado()
@@ -1254,6 +1266,10 @@ class JanelaPrincipal(QMainWindow):
             nomes = ", ".join(f.nome for f in resultado.sem_par[:3])
             mensagem += f" · {len(resultado.sem_par)} sem correspondência (não alterados): {nomes}"
         self.avisar(mensagem)
+
+    def mostrar_sobre(self):
+        from tagger.gui.sobre import DialogoSobre
+        DialogoSobre(self).exec()
 
     def _aplicar_renomeacao(self, mapa, mtimes_antes=None):
         """Arquivos renomeados ({antigo: novo}): lista, rascunho e histórico passam a usar o caminho novo.
