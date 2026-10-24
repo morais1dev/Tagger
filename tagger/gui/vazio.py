@@ -97,8 +97,11 @@ class TelaVazia(QWidget):
         self.lbl_icone.setFixedSize(56, 56)
         titulo = QLabel("Arraste uma pasta ou arquivos de áudio aqui", objectName="tituloVazio",
                         alignment=Qt.AlignCenter)
+        titulo.setWordWrap(True)
         self.lbl_texto = QLabel(objectName="textoVazio", alignment=Qt.AlignCenter)
         self.lbl_texto.setWordWrap(True)
+        for lbl in (titulo, self.lbl_texto):
+            lbl.setMinimumWidth(0)
         self.definir_subpastas(True)
 
         botoes = QHBoxLayout()

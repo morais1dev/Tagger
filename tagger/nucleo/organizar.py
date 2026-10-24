@@ -282,3 +282,61 @@ def executar_organizacao(plano, remover_vazias=False, raiz_origem=None, criadas=
             raiz = raiz_origem if raiz_origem is not None and _dentro_de(pasta, raiz_origem) else None
             removidas += remover_pastas_vazias([pasta], raiz=raiz, proteger=protegidas)
     return feitos, falhas, removidas
+
+
+def _relativo(caminho, base):
+    """Caminho relativo à base, se estiver dentro dela; senão o caminho inteiro."""
+    try:
+        return Path(caminho).relative_to(base)
+    except ValueError:
+        return Path(caminho)
+
+
+def resumo_movimentos(feitos, base):
+    """
+    Linhas origem → destino do que foi movido, para mostrar ao usuário: [(origem, destino)] de texto.
+    Caminhos dentro de `base` aparecem relativos a ela; ordenados pelo destino.
+    """
+    linhas = [(str(_relativo(o, base)), str(_relativo(d, base))) for o, d in feitos]
+    return sorted(linhas, key=lambda linha: linha[1].lower())
+
+
+def resumo_falhas(falhas, base):
+    """Linhas arquivo → motivo do que não foi movido: [(origem, "Não movido: motivo")], como em resumo_movimentos."""
+    return [(str(_relativo(o, base)), f"Não movido: {erro}") for o, erro in falhas.items()]
+
+
+def pastas_de_destino(feitos):
+    """Pastas onde os arquivos movidos foram parar (sem repetir, na ordem em que aparecem)."""
+    return list(dict.fromkeys(d.parent for _o, d in feitos))
+
+
+def pasta_comum(caminhos):
+    """Pasta que contém todos os arquivos; None se não houver (lista vazia ou unidades diferentes)."""
+    pastas = [os.path.abspath(Path(c).parent) for c in caminhos]
+    try:
+        return Path(os.path.commonpath(pastas)) if pastas else None
+    except ValueError:
+        return None
+
+
+def pasta_apos_mover(pasta_atual, caminhos, preferidas=()):
+    """
+    Pasta que a migalha deve mostrar depois de mover arquivos. `caminhos`: onde as faixas da lista estão agora.
+    - continua a pasta aberta se ainda há alguma faixa dentro dela (movimento parcial);
+    - senão, a primeira das `preferidas` (ex.: o destino escolhido) que contém a pasta comum das faixas;
+    - senão, a própria pasta comum. Sem pasta comum, nada muda.
+    """
+    if pasta_atual is None:
+        return None
+    pasta_atual = Path(pasta_atual)
+    caminhos = [Path(c) for c in caminhos]
+    if any(_dentro_de(c, pasta_atual) for c in caminhos):
+        return pasta_atual
+    comum = pasta_comum(caminhos)
+    if comum is None:
+        return pasta_atual
+    for pasta in preferidas:
+        if pasta is not None and (_chave(pasta) == _chave(comum) or _dentro_de(comum, pasta)):
+            return Path(pasta)
+    return comum

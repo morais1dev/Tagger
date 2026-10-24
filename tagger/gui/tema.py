@@ -302,7 +302,7 @@ QLineEdit[erro="true"], QPlainTextEdit[erro="true"] { border-color: $erro; }
 QComboBox::drop-down { border: none; width: 24px; }
 QComboBox QAbstractItemView { background: $surface2; border: 1px solid $line2; selection-background-color: $sel; selection-color: $text; outline: 0; }
 QSpinBox::up-button, QSpinBox::down-button { border: none; width: 18px; }
-#busca { min-width: 220px; max-width: 300px; }
+#busca { max-width: 300px; }
 #busca:focus { border-color: $sel_line; }
 QCheckBox, QRadioButton { spacing: 8px; }
 

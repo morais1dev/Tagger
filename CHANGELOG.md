@@ -9,9 +9,13 @@ All notable changes to Tagger are listed here. Versions follow [Semantic Version
   - **Discogs** fills year, track/disc, album artist and label, and is good for private pressings and rare editions. Vinyl positions such as `A1`/`B2` become track and disc numbers. Discogs can also be used automatically when MusicBrainz finds nothing.
   - **Last.fm** keeps the tags as they are scrobbled: canonical names, the track list and the album version you pick by playcount ("Deluxe", "Remastered"…).
   - Covers still come only from the Cover Art Archive. A service without a key is disabled, with a tip explaining how to set one up. The window shows the attribution and links each service asks for, and **About** (`F1`) shows the Discogs notice.
+- After **Organize into folders**, a summary shows where each file went (was → now in) with an **Open folder** button. The list and the breadcrumb follow the files to the new folder.
 - **Label** ("Gravadora") tag for MP3 (`TPUB`), FLAC/Ogg (`ORGANIZATION`, also reads `LABEL`) and M4A (`LABEL` free-form atom, as Picard writes it). It shows in the editor panel and as an optional column, and works with pending changes.
 - **Group by album** (Settings → Behavior, off by default): with more than one album loaded, the list shows a header per album ("Album — Album artist, year", with the track count) and orders the tracks by disc and track. Selection, filter, in-cell editing and the row actions work as before; the header is not a track.
 - **Your own API keys, optional** (Settings → Online services): paste a Last.fm API key or a Discogs personal token to use instead of the keys built into Tagger, for example if the search stops working or you use it a lot. Fields are hidden like passwords and come with a short "How do I get my key?" guide. Keys are never written to `tagger.log` or shown in error details.
+
+### Changed
+- The window can now be much smaller (down to 600×320, was 960×600): the top bar drops the app name and shrinks the filter and Save button, the editor panel can be narrower and the empty screen scrolls on short windows.
 
 ## [2.1.0] — 2026-10-23
 
