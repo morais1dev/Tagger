@@ -85,8 +85,45 @@ def test_arquivo_vazio_ou_invalido_e_sem_chave(pasta, conteudo):
     assert discogs_authorization(None) is None
 
 
-def test_arquivo_ausente_e_sem_chave(pasta):
-    assert ler_embutidas() == {}
+def test_arquivo_ausente_e_sem_chave(pasta, caplog):
+    with caplog.at_level(logging.WARNING):
+        assert ler_embutidas() == {}
+    assert not caplog.records
+
+
+def test_arquivo_com_bom_e_lido(pasta):
+    (pasta / "chaves.json").write_text(json.dumps({"lastfm_api_key": "com-bom"}), encoding="utf-8-sig")
+    assert lastfm_api_key(None) == "com-bom"
+
+
+def test_arquivo_invalido_avisa_no_log_sem_valores(pasta, caplog):
+    gravar(pasta, '{"lastfm_api_key": "valor-que-nao-pode-aparecer"')
+    with caplog.at_level(logging.WARNING, logger="tagger"):
+        assert ler_embutidas() == {}
+    assert len(caplog.records) == 1
+    assert "chaves.json" in caplog.text and "valor-que-nao-pode-aparecer" not in caplog.text
+
+
+def test_ocultar_nao_avisa_nem_entra_em_recursao(pasta, caplog):
+    gravar(pasta, "{quebrado")
+    with caplog.at_level(logging.WARNING, logger="tagger"):
+        ocultar_credenciais("texto")
+    assert not caplog.records
+
+
+def test_no_exe_le_o_arquivo_uma_vez(monkeypatch, tmp_path):
+    pasta = tmp_path / "tagger" / "nucleo"
+    pasta.mkdir(parents=True)
+    gravar(pasta, {"lastfm_api_key": "primeira"})
+    monkeypatch.setattr(credenciais.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(credenciais.sys, "_MEIPASS", str(tmp_path), raising=False)
+    credenciais._ler_em_cache.cache_clear()
+    try:
+        assert lastfm_api_key(None) == "primeira"
+        gravar(pasta, {"lastfm_api_key": "segunda"})
+        assert lastfm_api_key(None) == "primeira"
+    finally:
+        credenciais._ler_em_cache.cache_clear()
 
 
 def test_arquivo_ignora_valores_vazios_e_nao_texto(pasta):
@@ -158,13 +195,39 @@ def test_oculta_credencial_literal_num_traceback(pasta, monkeypatch):
     monkeypatch.setenv("TAGGER_DISCOGS_TOKEN", "token-do-ambiente")
     rastro = ("Traceback (most recent call last):\n"
               '  File "busca.py", line 10, in buscar\n'
-              "urllib.error.HTTPError: HTTP Error 403 for chave-embutida-123 / token-do-ambiente / config-xyz\n")
-    oculto = ocultar_credenciais(rastro, conhecidas=["config-xyz"])
+              "urllib.error.HTTPError: HTTP Error 403 for chave-embutida-123 / token-do-ambiente / config-xyz-0123456789\n")
+    oculto = ocultar_credenciais(rastro, conhecidas=["config-xyz-0123456789"])
     assert "chave-embutida-123" not in oculto
     assert "token-do-ambiente" not in oculto
-    assert "config-xyz" not in oculto
+    assert "config-xyz-0123456789" not in oculto
     assert oculto.count("***") == 3
     assert oculto.startswith("Traceback (most recent call last):")
+
+
+@pytest.mark.parametrize("texto, esperado", [
+    ("{'api_key': 'abc123', 'x': 1}", "{'api_key': '***', 'x': 1}"),
+    ('{"api_key":"abc123","format":"json"}', '{"api_key":"***","format":"json"}'),
+    ("https://ws/2.0/?api%5Fkey=abc123&x=1", "https://ws/2.0/?api%5Fkey=***&x=1"),
+    ("https://ws/2.0/?API_KEY=abc123", "https://ws/2.0/?API_KEY=***"),
+    ('Authorization: Discogs token="AbC123xyz"', 'Authorization: Discogs token="***"'),
+    ("token = AbC123xyz fim", "token = *** fim"),
+    ("token: AbC123xyz", "token: ***"),
+    ("https://api.discogs.com/database/search?q=x&key=minhakey&secret=meusecret&page=2",
+     "https://api.discogs.com/database/search?q=x&key=***&secret=***&page=2"),
+    ("{'Authorization': 'Discogs key=k1, secret=s1'}", "{'Authorization': 'Discogs key=***, secret=***'}"),
+])
+def test_oculta_outras_formas(pasta, texto, esperado):
+    assert ocultar_credenciais(texto) == esperado
+
+
+def test_nao_confunde_palavras_que_terminam_em_key(pasta):
+    texto = "monkey=banana; hotkey: F5; KeyError: 'title'"
+    assert ocultar_credenciais(texto) == texto
+
+
+def test_credencial_literal_curta_nao_e_trocada(pasta):
+    texto = "Falha ao abrir a pasta rock/abc"
+    assert ocultar_credenciais(texto, conhecidas=["abc", "rock"]) == texto
 
 
 def test_nao_estraga_texto_sem_credenciais(pasta):

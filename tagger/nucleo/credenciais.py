@@ -17,7 +17,10 @@ import logging
 import os
 import re
 import sys
+from functools import lru_cache
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 ARQUIVO = "chaves.json"
 VARIAVEIS = {
@@ -28,7 +31,7 @@ VARIAVEIS = {
 }
 EMBUTIDAS = ("lastfm_api_key", "discogs_key", "discogs_secret")
 OCULTO = "***"
-TAMANHO_MINIMO = 4        # credenciais literais menores que isso não são trocadas (evita estragar o texto)
+TAMANHO_MINIMO = 16       # credenciais literais menores que isso não são trocadas (lixo curto colado estragaria o log)
 
 
 def pasta_chaves():
@@ -46,16 +49,44 @@ def _limpo(valor):
     return valor or None
 
 
-def ler_embutidas(pasta=None):
-    """{nome: valor} do chaves.json. Ausente, vazio ou inválido = {} (nunca levanta exceção)."""
+def ler_embutidas(pasta=None, avisar=True):
+    """{nome: valor} do chaves.json. Ausente, vazio ou inválido = {} (nunca levanta exceção).
+
+    Arquivo presente mas inválido gera um aviso no log (sem valores), a menos que avisar=False
+    (usado ao ocultar credenciais no próprio log, para não entrar em recursão).
+    No .exe o arquivo não muda, então a leitura fica em cache.
+    """
     caminho = Path(pasta or pasta_chaves()) / ARQUIVO
+    if getattr(sys, "frozen", False) and pasta is None:
+        embutidas, problema = _ler_em_cache(str(caminho))
+    else:
+        embutidas, problema = _ler(caminho)
+    if problema and avisar:
+        log.warning("chaves.json inválido (%s): chaves embutidas ignoradas", problema)
+    return dict(embutidas)
+
+
+@lru_cache(maxsize=4)
+def _ler_em_cache(caminho):
+    embutidas, problema = _ler(Path(caminho))
+    return tuple(embutidas.items()), problema
+
+
+def _ler(caminho):
+    """({nome: valor}, descrição do problema ou None). Arquivo ausente não é problema."""
     try:
-        dados = json.loads(caminho.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+        texto = caminho.read_text(encoding="utf-8-sig")     # aceita BOM (Bloco de Notas do Windows)
+    except FileNotFoundError:
+        return {}, None
+    except (OSError, UnicodeError) as erro:
+        return {}, type(erro).__name__
+    try:
+        dados = json.loads(texto)
+    except ValueError:
+        return {}, "JSON inválido"
     if not isinstance(dados, dict):
-        return {}
-    return {nome: v for nome in EMBUTIDAS if (v := _limpo(dados.get(nome)))}
+        return {}, "não é um objeto JSON"
+    return {nome: v for nome in EMBUTIDAS if (v := _limpo(dados.get(nome)))}, None
 
 
 def _do_ambiente(nome, ambiente=None):
@@ -97,22 +128,25 @@ def discogs_disponivel(token_usuario, pasta=None, ambiente=None):
 def credenciais_conhecidas(extras=(), pasta=None, ambiente=None):
     """Todos os valores de credencial carregados agora (ambiente, chaves.json e extras), sem repetir."""
     valores = {_do_ambiente(nome, ambiente) for nome in VARIAVEIS}
-    valores.update(ler_embutidas(pasta).values())
+    valores.update(ler_embutidas(pasta, avisar=False).values())
     valores.update(_limpo(v) for v in extras)
     return {v for v in valores if v and len(v) >= TAMANHO_MINIMO}
 
 
-# api_key=... em URLs (também já codificado: api_key%3D...)
-_RE_API_KEY = re.compile(r"(api_key(?:=|%3D))(?:(?!%26)[^&\s'\"<>])+", re.IGNORECASE)
-# cabeçalho "Discogs token=..., key=..., secret=..." (com ou sem "Authorization:")
-_RE_DISCOGS = re.compile(r"(Discogs\s+)((?:\w+=[^,\s'\"]+\s*,?\s*)+)", re.IGNORECASE)
-_RE_PAR = re.compile(r"\b(token|key|secret)=([^,\s'\"]+)", re.IGNORECASE)
+# nome=valor / nome: valor / "nome": "valor" para api_key (também api%5Fkey), token, key e secret:
+# em URLs (inclusive já codificadas, ...%3Dvalor%26...), cabeçalhos "Discogs key=..., secret=...",
+# dicionários e JSON. O nome não pode ser o fim de outra palavra (ex.: "monkey=" fica como está).
+_RE_PAR = re.compile(
+    r"(?<!\w)(api(?:_|%5F)key|token|key|secret)"
+    r"([\"']?\s*(?:[:=]|%3D)\s*[\"']?)"
+    r"(?:(?!%26|%2C)[^\s&,;'\"<>(){}\[\]])+",
+    re.IGNORECASE)
 
 
 def ocultar_credenciais(texto, conhecidas=(), pasta=None, ambiente=None):
     """Troca credenciais por *** antes de o texto ir para o log ou para um diálogo de erro.
 
-    Cobre api_key= em URLs, token/key/secret em cabeçalhos do Discogs e qualquer credencial
+    Cobre api_key, token, key e secret seguidos de = ou : (URLs, cabeçalhos do Discogs, dicionários, JSON) e qualquer credencial
     carregada no momento (ambiente, chaves.json e as `conhecidas`, ex.: as das Configurações)
     que apareça literalmente no texto.
     """
@@ -121,9 +155,7 @@ def ocultar_credenciais(texto, conhecidas=(), pasta=None, ambiente=None):
     texto = str(texto)
     for valor in sorted(credenciais_conhecidas(conhecidas, pasta, ambiente), key=len, reverse=True):
         texto = texto.replace(valor, OCULTO)
-    texto = _RE_API_KEY.sub(lambda m: m.group(1) + OCULTO, texto)
-    return _RE_DISCOGS.sub(lambda m: m.group(1) + _RE_PAR.sub(lambda p: f"{p.group(1)}={OCULTO}", m.group(2)),
-                           texto)
+    return _RE_PAR.sub(lambda m: m.group(1) + m.group(2) + OCULTO, texto)
 
 
 class FormatadorSemCredenciais(logging.Formatter):

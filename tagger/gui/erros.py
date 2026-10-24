@@ -89,13 +89,17 @@ def instalar_tratamento_de_erros(caminho_log):
         if issubclass(tipo, KeyboardInterrupt):
             sys.__excepthook__(tipo, valor, rastro)
             return
-        detalhes = ocultar_credenciais("".join(traceback.format_exception(tipo, valor, rastro)),
-                                       credenciais_das_configuracoes())
+        try:
+            conhecidas = credenciais_das_configuracoes()
+        except Exception:             # QSettings indisponível (app fechando): oculta só o que der
+            conhecidas = ()
+        detalhes = ocultar_credenciais("".join(traceback.format_exception(tipo, valor, rastro)), conhecidas)
         log.error("Erro não tratado:\n%s", detalhes)
         try:
             ponte.erro.emit(detalhes)
-        except RuntimeError:          # app já fechando
-            sys.__excepthook__(tipo, valor, rastro)
+        except RuntimeError:          # app já fechando: o traceback vai para o stderr, já sem credenciais
+            if sys.__stderr__:
+                sys.__stderr__.write(detalhes)
 
     sys.excepthook = gancho
     threading.excepthook = lambda args: gancho(args.exc_type, args.exc_value, args.exc_traceback)
