@@ -2,4 +2,4 @@
 
 A versão é definida só aqui: a GUI, a CLI e o build leem daqui."""
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
