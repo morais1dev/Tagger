@@ -2,7 +2,7 @@
 
 All notable changes to Tagger are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.2.0] — 2026-10-24
 
 ### Added
 - **Online search window** ("Buscar online" button in the top bar, `Ctrl+Shift+M` or the right-click menu): choose **MusicBrainz**, **Discogs** or **Last.fm**, see a before/after preview of every field and send the result to the pending changes (nothing is written until you save).
