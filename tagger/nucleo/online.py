@@ -249,6 +249,8 @@ class _RedirecionamentoSeguro(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if urllib.parse.urlsplit(newurl).scheme.lower() != "https":
+            if fp is not None:
+                fp.close()                    # a resposta do redirect não vai ser lida
             raise RedirecionamentoRecusado(f"redirecionamento {code} para fora do https recusado: {newurl}")
         novo = super().redirect_request(req, fp, code, msg, headers, newurl)
         if novo is not None and _origem(newurl) != _origem(req.full_url):
