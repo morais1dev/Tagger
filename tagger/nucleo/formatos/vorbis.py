@@ -36,12 +36,14 @@ CHAVES = {
     "lyricist":    "LYRICIST",
     "comment":     "COMMENT",
     "lyrics":      "LYRICS",
+    "gravadora":   "ORGANIZATION",
 }
 
 # Nomes que outros programas usam para o mesmo campo (ver regra no topo).
 ALTERNATIVAS = {
     "albumartist": ("ALBUM ARTIST",),
     "comment":     ("DESCRIPTION",),
+    "gravadora":   ("LABEL",),
     "lyrics":      ("UNSYNCEDLYRICS",),
 }
 
