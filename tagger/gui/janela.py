@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from tagger.nucleo import metadata
+from tagger.nucleo.credenciais import estado_servicos
 from tagger.nucleo.metadata import (
     CAMPOS, analisar_extras, carregar, carregar_varios, curingas_audio, foi_modificado, formato, limpar_extras,
     listar_audios, mtime_atual, nomes_formatos, rotulo, validar_valor,
@@ -222,6 +223,9 @@ class FiltroJanelas(QObject):
 # ============================================================================
 
 class JanelaPrincipal(QMainWindow):
+    # {"lastfm"/"discogs": EstadoServico} sempre que as Configurações são salvas (botões da busca online)
+    servicos_mudaram = Signal(dict)
+
     def __init__(self):
         super().__init__()
         self.settings = QSettings("Tagger", "Tagger")
@@ -651,6 +655,11 @@ class JanelaPrincipal(QMainWindow):
         self._aplicar_config_pendente()
         if aceito:
             salvar_config(self.settings, self.config)
+            self.servicos_mudaram.emit(self.estado_servicos())
+
+    def estado_servicos(self):
+        """Last.fm/Discogs disponíveis com as Configurações atuais, e a dica para quando não estão."""
+        return estado_servicos(self.config)
 
     def alternar_tema(self):
         self.config["usar_escuro"] = not self.config["usar_escuro"]

@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import sys
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
@@ -129,6 +130,38 @@ def lastfm_disponivel(valor_config, pasta=None, ambiente=None):
 
 def discogs_disponivel(token_usuario, pasta=None, ambiente=None):
     return discogs_authorization(token_usuario, pasta, ambiente) is not None
+
+
+# chaves das Configurações (gui/config.py: PADROES) que guardam credenciais coladas pelo usuário
+CHAVES_CONFIG = ("lastfm_api_key", "discogs_token")
+DICAS = {
+    "lastfm": "Busca no Last.fm indisponível: falta a chave da API. "
+              "Cole a sua em Configurações → Serviços online.",
+    "discogs": "Busca no Discogs indisponível: faltam as credenciais. "
+               "Cole o seu token pessoal em Configurações → Serviços online.",
+}
+
+
+@dataclass(frozen=True)
+class EstadoServico:
+    disponivel: bool
+    dica: str | None        # texto para o tooltip do botão/menu desabilitado; None se disponível
+
+
+def estado_servicos(config, pasta=None, ambiente=None):
+    """{"lastfm": EstadoServico, "discogs": EstadoServico} a partir do dicionário das Configurações."""
+    config = config or {}
+    disponivel = {
+        "lastfm": lastfm_disponivel(config.get("lastfm_api_key"), pasta, ambiente),
+        "discogs": discogs_disponivel(config.get("discogs_token"), pasta, ambiente),
+    }
+    return {nome: EstadoServico(ok, None if ok else DICAS[nome]) for nome, ok in disponivel.items()}
+
+
+def credenciais_da_config(config):
+    """Valores colados nas Configurações, para passar como `conhecidas` em ocultar_credenciais."""
+    config = config or {}
+    return tuple(v for chave in CHAVES_CONFIG if (v := _limpo(config.get(chave))))
 
 
 def credenciais_conhecidas(extras=(), pasta=None, ambiente=None):
