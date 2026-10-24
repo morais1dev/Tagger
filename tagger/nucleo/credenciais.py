@@ -62,8 +62,14 @@ def ler_embutidas(pasta=None, avisar=True):
     else:
         embutidas, problema = _ler(caminho)
     if problema and avisar:
-        log.warning("chaves.json inválido (%s): chaves embutidas ignoradas", problema)
+        _avisar_uma_vez(str(caminho), problema)
     return dict(embutidas)
+
+
+@lru_cache(maxsize=16)
+def _avisar_uma_vez(caminho, problema):
+    """Um aviso por arquivo e problema, não um a cada requisição."""
+    log.warning("chaves.json inválido (%s): chaves embutidas ignoradas", problema)
 
 
 @lru_cache(maxsize=4)
@@ -135,10 +141,12 @@ def credenciais_conhecidas(extras=(), pasta=None, ambiente=None):
 
 # nome=valor / nome: valor / "nome": "valor" para api_key (também api%5Fkey), token, key e secret:
 # em URLs (inclusive já codificadas, ...%3Dvalor%26...), cabeçalhos "Discogs key=..., secret=...",
-# dicionários e JSON. O nome não pode ser o fim de outra palavra (ex.: "monkey=" fica como está).
+# dicionários e JSON. Antes do nome pode vir _ (lastfm_api_key, TAGGER_DISCOGS_TOKEN), mas não letra
+# ou dígito ("monkey=" fica como está), exceto logo depois de %26 (&) ou %3F (?) numa URL codificada.
+# Os espaços em volta do = ou : não atravessam quebra de linha.
 _RE_PAR = re.compile(
-    r"(?<!\w)(api(?:_|%5F)key|token|key|secret)"
-    r"([\"']?\s*(?:[:=]|%3D)\s*[\"']?)"
+    r"(?:(?<![A-Za-z0-9])|(?<=%26)|(?<=%3F))(api(?:_|%5F)key|token|key|secret)"
+    r"([\"']?[ \t]*(?:[:=]|%3D)[ \t]*[\"']?)"
     r"(?:(?!%26|%2C)[^\s&,;'\"<>(){}\[\]])+",
     re.IGNORECASE)
 

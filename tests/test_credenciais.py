@@ -104,6 +104,14 @@ def test_arquivo_invalido_avisa_no_log_sem_valores(pasta, caplog):
     assert "chaves.json" in caplog.text and "valor-que-nao-pode-aparecer" not in caplog.text
 
 
+def test_arquivo_invalido_avisa_uma_vez_so(pasta, caplog):
+    gravar(pasta, "{quebrado de novo")
+    with caplog.at_level(logging.WARNING, logger="tagger"):
+        for _ in range(3):
+            lastfm_api_key(None)
+    assert len(caplog.records) == 1
+
+
 def test_ocultar_nao_avisa_nem_entra_em_recursao(pasta, caplog):
     gravar(pasta, "{quebrado")
     with caplog.at_level(logging.WARNING, logger="tagger"):
@@ -215,6 +223,15 @@ def test_oculta_credencial_literal_num_traceback(pasta, monkeypatch):
     ("https://api.discogs.com/database/search?q=x&key=minhakey&secret=meusecret&page=2",
      "https://api.discogs.com/database/search?q=x&key=***&secret=***&page=2"),
     ("{'Authorization': 'Discogs key=k1, secret=s1'}", "{'Authorization': 'Discogs key=***, secret=***'}"),
+    ("u=https%3A%2F%2Fws%2F2.0%2F%3Fmethod%3Dx%26api_key%3Dabc123def", "u=https%3A%2F%2Fws%2F2.0%2F%3Fmethod%3Dx%26api_key%3D***"),
+    ("x%3Fapi_key%3Dabc123", "x%3Fapi_key%3D***"),
+    ("x%3fapi_key%3dabc123%26y", "x%3fapi_key%3d***%26y"),
+    ("x%26key%3Dk1%26secret%3Ds1", "x%26key%3D***%26secret%3D***"),
+    ("lastfm_api_key=ABC", "lastfm_api_key=***"),
+    ("{'lastfm_api_key': 'ABC'}", "{'lastfm_api_key': '***'}"),
+    ("TAGGER_DISCOGS_TOKEN=TOK", "TAGGER_DISCOGS_TOKEN=***"),
+    ("discogs_secret: S1", "discogs_secret: ***"),
+    ("discogs_key=K1 resto", "discogs_key=*** resto"),
 ])
 def test_oculta_outras_formas(pasta, texto, esperado):
     assert ocultar_credenciais(texto) == esperado
@@ -223,6 +240,12 @@ def test_oculta_outras_formas(pasta, texto, esperado):
 def test_nao_confunde_palavras_que_terminam_em_key(pasta):
     texto = "monkey=banana; hotkey: F5; KeyError: 'title'"
     assert ocultar_credenciais(texto) == texto
+
+
+def test_nao_atravessa_quebra_de_linha(pasta):
+    texto = 'secret:\n  File "busca.py", line 10'
+    assert ocultar_credenciais(texto) == texto
+    assert ocultar_credenciais("token =\nAbC123") == "token =\nAbC123"
 
 
 def test_credencial_literal_curta_nao_e_trocada(pasta):
