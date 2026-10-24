@@ -171,16 +171,32 @@ class FonteLastfm:
         return f"{html.escape(texto)} · " + " · ".join(partes)
 
 
+def credenciais_resolvidas(config=None):
+    """{"lastfm": api_key | None, "discogs": cabeçalho Authorization | None} já resolvidos
+    (Configurações > ambiente > chaves.json), como o cliente vai usar."""
+    config = config or {}
+    return {LASTFM: credenciais.lastfm_api_key(config.get("lastfm_api_key")),
+            DISCOGS: credenciais.discogs_authorization(config.get("discogs_token"))}
+
+
+def criar_fonte(nome, credencial, pasta_cache=None):
+    """Fonte do Discogs ou do Last.fm com essa credencial (guardada em fonte.credencial); None sem ela."""
+    if not credencial:
+        return None
+    if nome == DISCOGS:
+        fonte = FonteDiscogs(discogs.ClienteDiscogs(credencial))
+    else:
+        fonte = FonteLastfm(lastfm.ClienteLastfm(credencial, pasta_cache=pasta_cache))
+    fonte.credencial = credencial
+    return fonte
+
+
 def criar_fontes(config=None, pasta_cache=None):
     """{nome: fonte ou None (sem credencial)} a partir do dicionário das Configurações."""
-    config = config or {}
-    api_key = credenciais.lastfm_api_key(config.get("lastfm_api_key"))
-    authorization = credenciais.discogs_authorization(config.get("discogs_token"))
-    return {
-        MUSICBRAINZ: FonteMusicBrainz(busca.ClienteMusicBrainz()),
-        DISCOGS: FonteDiscogs(discogs.ClienteDiscogs(authorization)) if authorization else None,
-        LASTFM: FonteLastfm(lastfm.ClienteLastfm(api_key, pasta_cache=pasta_cache)) if api_key else None,
-    }
+    fontes = {MUSICBRAINZ: FonteMusicBrainz(busca.ClienteMusicBrainz())}
+    for nome, credencial in credenciais_resolvidas(config).items():
+        fontes[nome] = criar_fonte(nome, credencial, pasta_cache)
+    return fontes
 
 
 def linhas_da_previa(alteracoes, valor):
@@ -233,7 +249,9 @@ class DialogoBuscaOnline(QDialog):
         self._fechado = False
         self._resultado = None
         self._trabalho = None
-        self._fonte_resultados = None          # fonte dos itens na lista (pode ser o Discogs como alternativa)
+        # fonte (o objeto) que trouxe os itens da lista: pode ser o Discogs como alternativa, e pode deixar de
+        # ser a de self._fontes se as credenciais mudarem com a janela aberta (aí os itens são descartados)
+        self._fonte_lista = None
         # id(candidato) -> (candidato, release, alteracoes, casadas, sem_par). O id só vale enquanto o objeto
         # vive (o CPython reaproveita): por isso a entrada guarda o candidato, conferido com `is` em _detalhe,
         # e o dicionário é limpo a cada busca nova e troca de fonte.
@@ -350,24 +368,30 @@ class DialogoBuscaOnline(QDialog):
 
     # ------------------------------------------------------------ serviços
     def _aplicar_estados(self, estados, config=None):
-        """Serviço indisponível fica sem fonte (botão desabilitado com a dica); o que voltou a ficar
-        disponível ganha a fonte de novo, criada com a `config` atual."""
-        novas = None
+        """Com `config`: a fonte cuja credencial resolvida mudou (token trocado, apagado e caindo na chave
+        embutida...) é recriada, para nenhum pedido seguir com a credencial antiga. Serviço indisponível
+        em `estados` fica sem fonte (botão desabilitado com a dica)."""
+        if config is not None:
+            for nome, credencial in credenciais_resolvidas(config).items():
+                if getattr(self._fontes.get(nome), "credencial", None) != credencial:
+                    self._fontes[nome] = criar_fonte(nome, credencial, pasta_cache_lastfm())
         for nome, estado in (estados or {}).items():
-            if nome not in SEM_CHAVE:
-                continue
-            if not estado.disponivel:
+            if nome in SEM_CHAVE and not estado.disponivel:
                 self._fontes[nome] = None
                 self._dicas_sem_chave[nome] = estado.dica or SEM_CHAVE[nome]
-            elif self._fontes.get(nome) is None and config is not None:
-                novas = novas or criar_fontes(config, pasta_cache_lastfm())
-                self._fontes[nome] = novas[nome]
 
     def atualizar_servicos(self, estados, config):
         """Ligado ao sinal JanelaPrincipal.servicos_mudaram enquanto a janela está aberta."""
         self._conhecidas = tuple(dict.fromkeys(self._conhecidas + credenciais.credenciais_da_config(config)))
         self._aplicar_estados(estados, config)
         self._atualizar_dicas()
+        if self._fonte_lista is not None and not self._fonte_valida(self._fonte_lista):
+            nome = NOMES[self._fonte_lista.nome]
+            self.lista.clear()
+            self._detalhes.clear()
+            self._fonte_lista = None
+            self._limpar_previa("Prévia: escolha um resultado.")
+            self._mensagem(f"As credenciais do {nome} mudaram: busque de novo.")
         if self._fontes.get(self.fonte) is None:
             self.botoes_fonte[MUSICBRAINZ].setChecked(True)
         self._atualizar()
@@ -381,6 +405,14 @@ class DialogoBuscaOnline(QDialog):
         if not tem_discogs:
             self.ck_alternativa.setChecked(False)
         self.ck_alternativa.setToolTip("" if tem_discogs else self._dicas_sem_chave[DISCOGS])
+
+    def _fonte_valida(self, fonte):
+        """A fonte ainda é a atual daquele serviço (não foi trocada nem desligada)?"""
+        return fonte is not None and self._fontes.get(fonte.nome) is fonte
+
+    @property
+    def _fonte_resultados(self):
+        return self._fonte_lista.nome if self._fonte_lista is not None else None
 
     # ------------------------------------------------------------ estado
     @property
@@ -398,7 +430,7 @@ class DialogoBuscaOnline(QDialog):
             botao.setEnabled(livre and self._fontes.get(nome) is not None)
         detalhe = self._detalhe(self._candidato())
         self.btn_aplicar.setEnabled(livre and detalhe is not None and bool(detalhe[2]))
-        fonte = self._fontes.get(self._fonte_resultados or self.fonte)
+        fonte = self._fonte_lista or self._fontes.get(self.fonte)
         self.ck_capa.setVisible(bool(fonte and fonte.tem_capa))
         self.ck_alternativa.setVisible(self.fonte == MUSICBRAINZ)
 
@@ -427,7 +459,7 @@ class DialogoBuscaOnline(QDialog):
         self.lista.clear()
         self._detalhes.clear()
         self._limpar_previa("Prévia: escolha um resultado.")
-        self._fonte_resultados = None
+        self._fonte_lista = None
         self._definir_atribuicao(self._atribuicao_da_fonte(nome))
         self._mensagem(DICAS[nome])
         self._atualizar()
@@ -459,8 +491,8 @@ class DialogoBuscaOnline(QDialog):
                     raise
                 itens = []
             if itens or alternativa is None:
-                return principal.nome, itens
-            return alternativa.nome, alternativa.buscar(*termos)
+                return principal, itens
+            return alternativa, alternativa.buscar(*termos)
 
         self._executar(trabalho, self._buscou, f"Buscando no {NOMES[self.fonte]}...")
 
@@ -473,8 +505,12 @@ class DialogoBuscaOnline(QDialog):
         if erro:
             self._mensagem(erro)
             return
-        nome, itens = dados
-        self._fonte_resultados = nome
+        fonte, itens = dados
+        if not self._fonte_valida(fonte):
+            self._mensagem(f"As credenciais do {NOMES[fonte.nome]} mudaram durante a busca: busque de novo.")
+            return
+        self._fonte_lista = fonte
+        nome = fonte.nome
         for descricao, candidato in itens:
             item = QListWidgetItem(descricao)
             item.setData(Qt.UserRole, candidato)
@@ -518,12 +554,14 @@ class DialogoBuscaOnline(QDialog):
             return
         if self._ocupado():
             return                            # _ao_terminar busca este depois
-        fonte = self._fontes[self._fonte_resultados]
+        fonte = self._fonte_lista
+        if fonte is None:
+            return
         faixas, valor = self.faixas, self._valor
 
         def trabalho():
             release = fonte.detalhar(candidato)
-            return candidato, release, fonte.analisar(faixas, release, valor)
+            return fonte, candidato, release, fonte.analisar(faixas, release, valor)
 
         self._limpar_previa("Carregando a prévia...")
         self._executar(trabalho, self._detalhou, "Baixando dados do álbum...")
@@ -535,9 +573,9 @@ class DialogoBuscaOnline(QDialog):
             self._limpar_previa("Prévia indisponível.")
             self._mensagem(erro)
             return
-        candidato, release, (alteracoes, casadas, sem_par) = dados
-        if not self._na_lista(candidato):
-            return                            # resposta de uma busca anterior: descarta
+        fonte, candidato, release, (alteracoes, casadas, sem_par) = dados
+        if fonte is not self._fonte_lista or not self._na_lista(candidato):
+            return                            # resposta de uma busca anterior ou de credencial velha: descarta
         self._detalhes[id(candidato)] = (candidato, release, alteracoes, casadas, sem_par)
         if candidato is self._candidato():
             self._mostrar_previa(candidato)
@@ -548,8 +586,7 @@ class DialogoBuscaOnline(QDialog):
 
     def _mostrar_previa(self, candidato):
         release, alteracoes, casadas, sem_par = self._detalhe(candidato)
-        fonte = self._fontes[self._fonte_resultados]
-        self._definir_atribuicao(fonte.atribuicao(release))
+        self._definir_atribuicao(self._fonte_lista.atribuicao(release))
         linhas = linhas_da_previa(alteracoes, self._valor)
         self.previa.setRowCount(len(linhas))
         for i, linha in enumerate(linhas):
@@ -576,9 +613,9 @@ class DialogoBuscaOnline(QDialog):
         if self._ocupado() or detalhe is None:
             return
         _release, alteracoes, casadas, sem_par = detalhe
-        if not casadas:
+        fonte = self._fonte_lista
+        if not casadas or fonte is None:
             return
-        fonte = self._fontes[self._fonte_resultados]
         if fonte.tem_capa and self.ck_capa.isChecked():
             self._executar(lambda: fonte.capa(candidato),
                            lambda capa, erro: self._concluir(alteracoes, capa, casadas, sem_par, erro),

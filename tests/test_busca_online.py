@@ -218,10 +218,109 @@ def test_servicos_mudaram_com_a_janela_aberta(app, monkeypatch):
     dlg.atualizar_servicos({"discogs": SimpleNamespace(disponivel=False, dica="Sem token agora")}, {})
     assert not dlg.botoes_fonte["discogs"].isEnabled() and dlg.fonte == "musicbrainz"
     assert dlg.botoes_fonte["discogs"].toolTip() == "Sem token agora" and not dlg.ck_alternativa.isEnabled()
-    monkeypatch.setattr(busca_online, "criar_fontes", lambda config, pasta: {"discogs": FonteContada(),
-                                                                             "lastfm": None, "musicbrainz": None})
+    monkeypatch.setattr(busca_online, "credenciais_resolvidas",
+                        lambda config: {"discogs": "Discogs token=" + config["discogs_token"], "lastfm": None})
     dlg.atualizar_servicos({"discogs": SimpleNamespace(disponivel=True, dica=None)},
                            {"discogs_token": "tokenNovo0123456789abcdef"})
     assert dlg.botoes_fonte["discogs"].isEnabled() and dlg.ck_alternativa.isEnabled()
     assert "tokenNovo0123456789abcdef" in dlg._conhecidas
+    dlg.reject()
+
+
+@pytest.fixture
+def discogs_falso(monkeypatch):
+    """Todo ClienteDiscogs criado pela janela usa a rede simulada; devolve a lista de pedidos."""
+    for nome in ("TAGGER_DISCOGS_TOKEN", "TAGGER_DISCOGS_KEY", "TAGGER_DISCOGS_SECRET", "TAGGER_LASTFM_API_KEY"):
+        monkeypatch.delenv(nome, raising=False)
+    from tagger.nucleo import credenciais
+    monkeypatch.setattr(credenciais, "ler_embutidas", lambda pasta=None, avisar=True: {})
+    rede = Rede({"/database/search?": Resposta(BUSCA_DISCOGS), "/releases/123": Resposta(VINIL)})
+    original = discogs.ClienteDiscogs
+    monkeypatch.setattr(discogs, "ClienteDiscogs",
+                        lambda authorization: original(authorization, rede, limitador_falso()[0], online.Cache(10 ** 6)))
+    return rede
+
+
+def buscar_no_discogs(app, dlg):
+    dlg.botoes_fonte["discogs"].setChecked(True)
+    dlg.buscar()
+    esperar(app, lambda: dlg.lista.count() == 1 and not dlg._ocupado())
+
+
+def test_trocar_o_token_com_a_janela_aberta_usa_o_novo(app, discogs_falso):
+    from tagger.gui import busca_online
+    from tagger.nucleo.credenciais import estado_servicos
+    config = {"discogs_token": "tokenVelho0123456789abcdef"}
+    dlg = dialogo({}, config=config)
+    dlg._fontes = dict(busca_online.criar_fontes(config))
+    dlg._atualizar_dicas()
+    buscar_no_discogs(app, dlg)
+    assert discogs_falso.pedidos[-1].unredirected_hdrs["Authorization"] == "Discogs token=tokenVelho0123456789abcdef"
+    novo = {"discogs_token": "tokenNovo0123456789abcdef"}
+    dlg.atualizar_servicos(estado_servicos(novo), novo)
+    assert dlg.lista.count() == 0 and "mudaram" in dlg.estado.text()     # resultados da credencial velha saem
+    buscar_no_discogs(app, dlg)
+    assert discogs_falso.pedidos[-1].unredirected_hdrs["Authorization"] == "Discogs token=tokenNovo0123456789abcdef"
+    dlg.reject()
+
+
+def test_apagar_o_token_volta_para_key_e_secret(app, discogs_falso, monkeypatch):
+    from tagger.gui import busca_online
+    from tagger.nucleo.credenciais import estado_servicos
+    monkeypatch.setenv("TAGGER_DISCOGS_KEY", "chaveDoApp0123456789")
+    monkeypatch.setenv("TAGGER_DISCOGS_SECRET", "segredoDoApp0123456789")
+    config = {"discogs_token": "tokenRemovido0123456789abc"}
+    dlg = dialogo({}, config=config)
+    dlg._fontes = dict(busca_online.criar_fontes(config))
+    dlg._atualizar_dicas()
+    vazio = {"discogs_token": ""}
+    dlg.atualizar_servicos(estado_servicos(vazio), vazio)
+    buscar_no_discogs(app, dlg)
+    assert discogs_falso.pedidos[-1].unredirected_hdrs["Authorization"] == \
+        "Discogs key=chaveDoApp0123456789, secret=segredoDoApp0123456789"
+    assert all("tokenRemovido" not in p.unredirected_hdrs.get("Authorization", "") for p in discogs_falso.pedidos)
+    dlg.reject()
+
+
+def test_credencial_muda_com_consulta_rodando_sem_quebrar(app, monkeypatch):
+    import threading
+    from tagger.gui import busca_online
+    solta = threading.Event()
+
+    class Lenta(FonteContada):
+        def buscar(self, *termos):
+            solta.wait(5)
+            return super().buscar(*termos)
+
+        def detalhar(self, candidato):
+            solta.wait(5)
+            return super().detalhar(candidato)
+
+    lenta = Lenta()
+    dlg = dialogo({"discogs": lenta}, fonte_inicial="discogs")
+    monkeypatch.setattr(busca_online, "credenciais_resolvidas", lambda config: {"discogs": "outra", "lastfm": None})
+    monkeypatch.setattr(busca_online, "criar_fonte", lambda nome, credencial, pasta=None: FonteContada())
+
+    dlg.buscar()                                          # 1) muda durante a busca
+    dlg.atualizar_servicos({}, {"discogs_token": "x"})
+    solta.set()
+    esperar(app, lambda: not dlg._ocupado() and "mudaram" in dlg.estado.text())
+    assert dlg.lista.count() == 0 and dlg._fonte_lista is None
+
+    solta.clear()                                         # 2) muda durante o detalhe
+    lenta = Lenta()
+    dlg._fontes["discogs"] = lenta
+    solta.set()
+    dlg.buscar()
+    esperar(app, lambda: dlg.lista.count() == 1 and not dlg._ocupado())
+    solta.clear()
+    dlg._detalhes.clear()
+    dlg._ao_selecionar()
+    assert dlg._ocupado()
+    dlg.atualizar_servicos({}, {"discogs_token": "y"})
+    solta.set()
+    esperar(app, lambda: not dlg._ocupado())
+    assert dlg.lista.count() == 0 and dlg.previa.rowCount() == 0
+    dlg.aplicar()                                         # nada selecionado, nenhuma fonte velha: não quebra
+    assert dlg.resultado() is None
     dlg.reject()
