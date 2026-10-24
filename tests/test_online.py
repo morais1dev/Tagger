@@ -87,7 +87,8 @@ def test_ocultar_api_key_header_e_literal():
     assert online.ocultar("GET https://x/?method=a&api_key=abc123&format=json") == \
         "GET https://x/?method=a&api_key=***&format=json"
     assert "SEGREDO" not in online.ocultar("Authorization: Discogs key=SEGREDOk, secret=SEGREDOs")
-    texto = online.ocultar("Traceback ...\n  valor SEGREDOliteral no meio\nfim", "SEGREDOliteral")
+    literal = "SEGREDOliteral0123456789"            # credenciais.py só troca literais com 16+ caracteres
+    texto = online.ocultar(f"Traceback ...\n  valor {literal} no meio\nfim", literal)
     assert "SEGREDO" not in texto and "fim" in texto
     assert online.ocultar("monkey=banana") == "monkey=banana"       # \b: não é 'key='
 
@@ -422,14 +423,14 @@ def test_lastfm_cache_respeita_cabecalhos_e_nao_grava_a_chave(tmp_path):
     assert CHAVE_LASTFM not in arquivos[0].name and CHAVE_LASTFM not in arquivos[0].read_text("utf-8")
 
 
-def test_ocultar_usa_credenciais_py_quando_existir(monkeypatch):
+def test_ocultar_passa_as_conhecidas_para_credenciais_py(monkeypatch):
     chamadas = []
 
     def falso(texto, conhecidas=()):
         chamadas.append(conhecidas)
         return texto.replace("ESPECIAL", "***")
 
-    monkeypatch.setattr(online, "_ocultar_credenciais", falso)
+    monkeypatch.setattr(online, "ocultar_credenciais", falso)
     assert online.ocultar("x ESPECIAL y", "valorConhecido") == "x *** y"
     assert chamadas == [("valorConhecido",)]
 
@@ -453,8 +454,26 @@ def test_authorization_do_discogs_nunca_segue_redirect():
 def test_redirect_para_fora_do_https_e_recusado(destino):
     h = online._RedirecionamentoSeguro()
     pedido = urllib.request.Request(f"https://ws.audioscrobbler.com/2.0/?api_key={CHAVE_LASTFM}")
-    with pytest.raises(urllib.error.HTTPError):
+    with pytest.raises(online.RedirecionamentoRecusado):
         h.redirect_request(pedido, None, 302, "Found", {}, destino)
+
+
+def test_redirect_recusado_tem_mensagem_propria_sem_credencial():
+    url = f"http://ws.audioscrobbler.com/2.0/?api_key={CHAVE_LASTFM}"
+    c, _, _ = cliente_lastfm({"album.getInfo": online.RedirecionamentoRecusado(f"recusado: {url}")})
+    with pytest.raises(ErroBusca, match="Redirecionamento inseguro recusado") as info:
+        c.detalhar_album("Banda", "Album X")
+    assert CHAVE_LASTFM not in info.value.detalhe
+    d, _, _, _ = cliente_discogs({"/releases/": online.RedirecionamentoRecusado("recusado")})
+    with pytest.raises(ErroBusca, match="Redirecionamento inseguro recusado"):
+        d.detalhar_release(1)
+
+
+def test_resposta_invalida_registra_o_erro_no_log_sem_credencial(caplog):
+    c, _, _, _ = cliente_discogs({"/releases/1": Resposta({"tracklist": ["x"], "nota": TOKEN})})
+    with caplog.at_level("DEBUG", logger="tagger.nucleo.online"), pytest.raises(ErroBusca, match="inválida"):
+        c.detalhar_release(1)
+    assert "AttributeError" in caplog.text and "SEGREDO" not in caplog.text
 
 
 def test_redirect_com_outra_porta_tira_authorization():

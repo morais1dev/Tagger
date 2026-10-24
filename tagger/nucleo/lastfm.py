@@ -141,6 +141,8 @@ class ClienteLastfm:
                     cabecalhos = dict(resposta.headers.items()) if getattr(resposta, "headers", None) else {}
                     corpo = resposta.read(LIMITE_RESPOSTA + 1)
                 status = 200
+            except online.RedirecionamentoRecusado as erro:
+                raise online.erro_busca(online.REDIRECIONAMENTO_RECUSADO, self._ocultar(erro)) from None
             except urllib.error.HTTPError as erro:
                 status = erro.code
                 try:

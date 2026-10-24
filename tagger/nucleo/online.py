@@ -1,7 +1,7 @@
 """
 Peças comuns aos clientes do Discogs e do Last.fm (sem Qt, só urllib).
 
-- `ocultar`: o ÚNICO ponto que limpa credenciais de mensagens de erro de rede;
+- `ocultar`: o ÚNICO ponto que limpa credenciais de mensagens de erro de rede (via credenciais.py);
 - `LimitadorJanela`: no máximo N requisições numa janela de tempo deslizante;
 - `Cache`: respostas guardadas pelo tempo que os cabeçalhos HTTP permitem, com teto de tamanho;
 - `abrir_sem_vazar`: urlopen que não repassa o cabeçalho Authorization num redirecionamento
@@ -15,42 +15,32 @@ import email.utils
 import functools
 import hashlib
 import json
+import logging
 import os
-import re
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections import OrderedDict, deque
 from pathlib import Path
 
-try:   # módulo do item de credenciais (outro branch); sem ele, vale só a limpeza local abaixo
-    from tagger.nucleo.credenciais import ocultar_credenciais as _ocultar_credenciais
-except ImportError:      # pragma: no cover - depende do merge
-    _ocultar_credenciais = None
+from tagger.nucleo.credenciais import ocultar_credenciais
 
 MB = 1024 * 1024
+REDIRECIONAMENTO_RECUSADO = "Redirecionamento inseguro recusado."
 
-_PADROES_SEGREDO = [
-    re.compile(r"(\b(?:api_key|token|key|secret|api_sig|sk)=)[^&\s,;\"']+", re.IGNORECASE),
-    re.compile(r"(Authorization:\s*)[^\r\n]+", re.IGNORECASE),
-]
+log = logging.getLogger(__name__)
 
 
 def ocultar(texto, *conhecidas):
-    """Troca por *** as credenciais do texto: as de credenciais.py (se houver), os padrões
-    api_key=/token=/key=/secret= e qualquer valor de `conhecidas` que apareça literalmente."""
-    texto = str(texto)
-    if _ocultar_credenciais is not None:
-        texto = _ocultar_credenciais(texto, conhecidas=tuple(c for c in conhecidas if c))
-    for valor in conhecidas:
-        if valor and len(valor.strip()) >= 4:
-            texto = texto.replace(valor, "***")
-            texto = texto.replace(urllib.parse.quote(valor, safe=""), "***")
-    for padrao in _PADROES_SEGREDO:
-        texto = padrao.sub(r"\1***", texto)
-    return texto
+    """Troca por *** as credenciais do texto (credenciais.ocultar_credenciais): os padrões
+    api_key=/token=/key=/secret=, as credenciais carregadas e as `conhecidas` (também na forma
+    codificada para URL), onde aparecerem literalmente."""
+    valores = [c for c in conhecidas if c]
+    valores += [urllib.parse.quote(c, safe="") for c in valores]
+    return ocultar_credenciais(str(texto), conhecidas=tuple(dict.fromkeys(valores)))
 
 
 def erro_busca(mensagem, detalhe):
@@ -219,6 +209,8 @@ def resposta_invalida(servico):
                 return funcao(*args, **kwargs)
             except ERROS_DE_FORMATO:
                 from tagger.nucleo.busca import ErroBusca
+                limpar = getattr(args[0], "_ocultar", ocultar) if args else ocultar
+                log.debug("Resposta inválida do %s:\n%s", servico, limpar(traceback.format_exc()))   # bug do parser?
                 raise ErroBusca(f"Resposta inválida do {servico}.") from None
         return consulta
     return decorar
@@ -246,6 +238,10 @@ def _origem(url):
     return partes.scheme.lower(), (partes.hostname or "").lower(), partes.port or {"https": 443, "http": 80}.get(partes.scheme.lower())
 
 
+class RedirecionamentoRecusado(urllib.error.URLError):
+    """O servidor tentou redirecionar para fora do https: a requisição não segue."""
+
+
 class _RedirecionamentoSeguro(urllib.request.HTTPRedirectHandler):
     """Redirecionamento só para https (a api_key do Last.fm vai na URL). E o urllib repassa o
     Authorization num redirecionamento: para outra origem (esquema, host, porta), tira.
@@ -253,7 +249,7 @@ class _RedirecionamentoSeguro(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if urllib.parse.urlsplit(newurl).scheme.lower() != "https":
-            raise urllib.error.HTTPError(req.full_url, code, "redirecionamento para fora do https recusado", headers, fp)
+            raise RedirecionamentoRecusado(f"redirecionamento {code} para fora do https recusado: {newurl}")
         novo = super().redirect_request(req, fp, code, msg, headers, newurl)
         if novo is not None and _origem(newurl) != _origem(req.full_url):
             for nome in list(novo.headers):

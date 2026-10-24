@@ -254,6 +254,8 @@ class ClienteDiscogs:
                 with self._abrir(pedido, timeout=TIMEOUT) as resposta:
                     self._ler_limite(getattr(resposta, "headers", None))
                     corpo = resposta.read(LIMITE_RESPOSTA + 1)
+            except online.RedirecionamentoRecusado as erro:
+                raise online.erro_busca(online.REDIRECIONAMENTO_RECUSADO, self._ocultar(erro)) from None
             except urllib.error.HTTPError as erro:
                 self._ler_limite(erro.headers)
                 if erro.code == 429 and tentativa < TENTATIVAS - 1:
