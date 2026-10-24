@@ -2,6 +2,14 @@
 
 All notable changes to Tagger are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- After **Organize into folders**, a summary shows where each file went (was → now in) with an **Open folder** button. The list and the breadcrumb follow the files to the new folder.
+
+### Changed
+- The window can now be much smaller (down to 600×320, was 960×600): the top bar drops the app name and shrinks the filter and Save button, the editor panel can be narrower and the empty screen scrolls on short windows.
+
 ## [2.1.0] — 2026-10-23
 
 ### Added

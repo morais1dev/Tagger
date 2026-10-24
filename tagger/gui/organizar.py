@@ -9,10 +9,15 @@ e chama nucleo.organizar.executar_organizacao.
 
 from pathlib import Path
 
-from PySide6.QtWidgets import QCheckBox, QFileDialog, QHBoxLayout, QLineEdit, QPushButton
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import (
+    QAbstractItemView, QCheckBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget,
+    QTableWidgetItem, QVBoxLayout,
+)
 
 from tagger.gui.padrao import DialogoPadrao
-from tagger.nucleo.organizar import PlanoOrganizar, planejar_organizacao
+from tagger.nucleo.organizar import PlanoOrganizar, planejar_organizacao, resumo_movimentos
 from tagger.nucleo.padroes import campos_do_padrao
 
 
@@ -101,3 +106,53 @@ class DialogoOrganizar(DialogoPadrao):
 
     def texto_ok(self, n):
         return "Organizar" if n == 0 else f"Organizar {n} {'arquivo' if n == 1 else 'arquivos'}"
+
+
+class DialogoResumoOrganizar(QDialog):
+    """Depois de mover: para onde cada arquivo foi (origem → destino), com atalho para abrir a pasta."""
+
+    def __init__(self, feitos, falhas, pasta, parent=None):
+        super().__init__(parent)
+        self.pasta = Path(pasta)
+        self.setWindowTitle("Arquivos organizados")
+        self.setMinimumSize(420, 300)
+
+        titulo = f"{len(feitos)} arquivo(s) movido(s) para {self.pasta}"
+        if falhas:
+            titulo += f" · {len(falhas)} não foram movidos e continuam onde estavam"
+        rotulo = QLabel(titulo)
+        rotulo.setWordWrap(True)
+        rotulo.setProperty("papel", "ajuda")
+
+        linhas = resumo_movimentos(feitos, self.pasta)
+        tabela = QTableWidget(len(linhas), 2)
+        tabela.setHorizontalHeaderLabels(["Era", "Agora está em"])
+        tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
+        tabela.verticalHeader().setVisible(False)
+        tabela.horizontalHeader().setStretchLastSection(True)
+        for i, (origem, destino) in enumerate(linhas):
+            for j, texto in enumerate((origem, destino)):
+                item = QTableWidgetItem(texto)
+                item.setToolTip(texto)
+                tabela.setItem(i, j, item)
+        tabela.resizeColumnToContents(0)
+        tabela.setColumnWidth(0, min(tabela.columnWidth(0), 260))
+
+        btn_abrir = QPushButton("Abrir pasta")
+        btn_abrir.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.pasta))))
+        btn_fechar = QPushButton("Fechar")
+        btn_fechar.setProperty("tipo", "primario")
+        btn_fechar.clicked.connect(self.accept)
+        btn_fechar.setDefault(True)
+        rodape = QHBoxLayout()
+        rodape.addStretch()
+        rodape.addWidget(btn_abrir)
+        rodape.addWidget(btn_fechar)
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(20, 20, 20, 16)
+        v.setSpacing(10)
+        v.addWidget(rotulo)
+        v.addWidget(tabela, 1)
+        v.addLayout(rodape)

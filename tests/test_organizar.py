@@ -4,7 +4,7 @@ import pytest
 
 from tagger.nucleo.organizar import (
     caminho_relativo, executar_movimentos, executar_organizacao, partes_do_padrao, planejar_organizacao,
-    remover_pastas_vazias,
+    pasta_comum, pastas_de_destino, remover_pastas_vazias, resumo_movimentos,
 )
 from tagger.nucleo.padroes import ItemRenomear
 
@@ -213,3 +213,25 @@ def test_pasta_aberta_nunca_e_removida(fabrica_mp3, tmp_path):
     _, falhas, removidas = executar_organizacao(plano, remover_vazias=True, raiz_origem=tmp_path / "aberta")
     assert not falhas, falhas
     assert removidas == [] and (tmp_path / "aberta").exists()
+
+
+def test_resumo_movimentos_relativo_a_base(tmp_path):
+    feitos = [(tmp_path / "b.mp3", tmp_path / "Z" / "Álbum" / "b.mp3"),
+              (tmp_path / "a.mp3", tmp_path / "A" / "Álbum" / "a.mp3"),
+              (tmp_path / "c.mp3", Path("elsewhere") / "c.mp3")]
+    assert resumo_movimentos(feitos, tmp_path) == [
+        ("a.mp3", str(Path("A") / "Álbum" / "a.mp3")),
+        ("c.mp3", str(Path("elsewhere") / "c.mp3")),
+        ("b.mp3", str(Path("Z") / "Álbum" / "b.mp3"))]
+
+
+def test_pastas_de_destino_sem_repetir(tmp_path):
+    feitos = [(tmp_path / "a.mp3", tmp_path / "X" / "a.mp3"), (tmp_path / "b.mp3", tmp_path / "X" / "b.mp3"),
+              (tmp_path / "c.mp3", tmp_path / "Y" / "c.mp3")]
+    assert pastas_de_destino(feitos) == [tmp_path / "X", tmp_path / "Y"]
+
+
+def test_pasta_comum(tmp_path):
+    assert pasta_comum([tmp_path / "A" / "1.mp3", tmp_path / "B" / "2.mp3"]) == tmp_path
+    assert pasta_comum([tmp_path / "A" / "1.mp3"]) == tmp_path / "A"
+    assert pasta_comum([]) is None
