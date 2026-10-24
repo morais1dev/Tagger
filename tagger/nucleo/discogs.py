@@ -28,7 +28,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
-from tagger.nucleo import busca, metadata, online
+from tagger.nucleo import busca, credenciais, metadata, online
 from tagger.nucleo.busca import ErroBusca, FaixaRelease, NAO_ENCONTRADO, USER_AGENT
 
 URL_API = "https://api.discogs.com"
@@ -44,7 +44,7 @@ TIMEOUT = busca.TIMEOUT
 LIMITE_RESPOSTA = 5 * online.MB
 CACHE_SEGUNDOS = 60 * 60          # bem abaixo do teto de 6 h das regras
 TETO_CACHE = 6 * 60 * 60
-SEM_CREDENCIAL = "Busca no Discogs desativada: configure uma chave nas Configurações."
+SEM_CREDENCIAL = credenciais.DICAS["discogs"]
 DOMINIOS = ("discogs.com",)       # links do JSON só são aceitos nesses hosts (a GUI vai abri-los)
 CAMPO_GRAVADORA = "gravadora"     # só é preenchido quando existir em metadata.CAMPOS
 

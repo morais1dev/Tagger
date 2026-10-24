@@ -37,16 +37,13 @@ log = logging.getLogger(__name__)
 
 MUSICBRAINZ, DISCOGS, LASTFM = "musicbrainz", "discogs", "lastfm"
 NOMES = {MUSICBRAINZ: "MusicBrainz", DISCOGS: "Discogs", LASTFM: "Last.fm"}
-DICAS = {
+DESCRICOES = {             # dica do botão de cada serviço disponível
     MUSICBRAINZ: "Banco de dados aberto, com capas do Cover Art Archive.",
     DISCOGS: "Bom para prensagens privadas, vinis e edições raras.",
     LASTFM: "As tags como são scrobbladas: nomes canônicos e a versão do álbum mais ouvida.",
 }
 ATRIBUICAO_MUSICBRAINZ = "Dados do MusicBrainz · capas do Cover Art Archive."
-SEM_CHAVE = {
-    DISCOGS: "Busca no Discogs desativada: cole o seu token pessoal em Configurações → Serviços online.",
-    LASTFM: "Busca no Last.fm desativada: cole a sua chave da API em Configurações → Serviços online.",
-}
+SEM_CHAVE = credenciais.DICAS     # dica do serviço indisponível: a mesma de credenciais.estado_servicos
 
 
 def pasta_cache_lastfm():
@@ -399,7 +396,7 @@ class DialogoBuscaOnline(QDialog):
     def _atualizar_dicas(self):
         for nome, botao in self.botoes_fonte.items():
             disponivel = self._fontes.get(nome) is not None
-            botao.setToolTip(DICAS[nome] if disponivel else self._dicas_sem_chave[nome])
+            botao.setToolTip(DESCRICOES[nome] if disponivel else self._dicas_sem_chave[nome])
         tem_discogs = self._fontes.get(DISCOGS) is not None
         self.ck_alternativa.setEnabled(tem_discogs)
         if not tem_discogs:
@@ -461,7 +458,7 @@ class DialogoBuscaOnline(QDialog):
         self._limpar_previa("Prévia: escolha um resultado.")
         self._fonte_lista = None
         self._definir_atribuicao(self._atribuicao_da_fonte(nome))
-        self._mensagem(DICAS[nome])
+        self._mensagem(DESCRICOES[nome])
         self._atualizar()
 
     def _definir_atribuicao(self, texto_html):
