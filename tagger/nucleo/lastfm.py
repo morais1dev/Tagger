@@ -38,6 +38,7 @@ TIMEOUT = busca.TIMEOUT
 LIMITE_RESPOSTA = 5 * online.MB
 TETO_CACHE = 100 * online.MB
 SEM_CREDENCIAL = "Busca no Last.fm desativada: configure uma chave nas Configurações."
+DOMINIOS = ("last.fm",)           # links do JSON só são aceitos nesses hosts (a GUI vai abri-los)
 ERRO_LIMITE = 29          # "Rate limit exceeded"
 ERROS_CHAVE = {10, 26}    # chave inválida / suspensa
 ERRO_NAO_ENCONTRADO = 6
@@ -74,6 +75,10 @@ class Album:
 
 def url_artista(nome):
     return f"{URL_SITE}/{urllib.parse.quote_plus(nome)}" if nome else ""
+
+
+def url_album(artista, titulo):
+    return f"{URL_SITE}/{urllib.parse.quote_plus(artista)}/{urllib.parse.quote_plus(titulo)}" if artista and titulo else ""
 
 
 def _lista(valor):
@@ -156,7 +161,9 @@ class ClienteLastfm:
                         continue
                     raise online.erro_busca(f"Erro do servidor do Last.fm ({status}).", detalhe_http) from None
                 raise
-            codigo = _inteiro(dados.get("error")) if isinstance(dados, dict) else 0
+            if not isinstance(dados, dict):
+                raise ErroBusca("Resposta inválida do Last.fm.")
+            codigo = _inteiro(dados.get("error"))
             if codigo == ERRO_LIMITE or (status == 429 and not codigo):
                 if tentativa < TENTATIVAS - 1:
                     self._limitador.bloquear(BACKOFF * 2 ** tentativa)
@@ -183,10 +190,11 @@ class ClienteLastfm:
     def _decodificar(corpo):
         try:
             return json.loads(corpo.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError, AttributeError):
+        except (ValueError, UnicodeDecodeError, AttributeError, RecursionError):
             raise ErroBusca("Resposta inválida do Last.fm.") from None
 
     # ------------------------------------------------------------ consultas
+    @online.resposta_invalida("Last.fm")
     def nome_canonico(self, artista):
         """Nome do artista corrigido pelo Last.fm ('the beatles' -> 'The Beatles'); sem correção, o próprio."""
         if not artista.strip():
@@ -199,6 +207,7 @@ class ClienteLastfm:
                 return nome
         return artista.strip()
 
+    @online.resposta_invalida("Last.fm")
     def top_albuns(self, artista, limite=50):
         """Álbuns do artista, do mais scrobblado ao menos."""
         if not artista.strip():
@@ -211,8 +220,10 @@ class ClienteLastfm:
                 continue
             nome = ((a.get("artist") or {}).get("name") or artista).strip()
             albuns.append(Album(titulo=titulo, artista=nome, playcount=_inteiro(a.get("playcount")),
-                                mbid=a.get("mbid") or "", url=a.get("url") or "",
-                                url_artista=(a.get("artist") or {}).get("url") or url_artista(nome)))
+                                mbid=a.get("mbid") or "",
+                                url=online.url_segura(a.get("url"), DOMINIOS, url_album(nome, titulo)),
+                                url_artista=online.url_segura((a.get("artist") or {}).get("url"), DOMINIOS,
+                                                              url_artista(nome))))
         albuns.sort(key=lambda a: -a.playcount)
         return albuns
 
@@ -229,6 +240,7 @@ class ClienteLastfm:
             raise ErroBusca("Informe o álbum.")
         return [a for a in self.top_albuns(artista, limite=limite) if base_do_album(a.titulo) == alvo]
 
+    @online.resposta_invalida("Last.fm")
     def detalhar_album(self, artista, album):
         """Nomes canônicos (autocorrect) e lista de faixas do álbum."""
         if not artista.strip() or not album.strip():
@@ -246,8 +258,10 @@ class ClienteLastfm:
                                        numero=_inteiro((f.get("@attr") or {}).get("rank")) or j,
                                        disco=1, total_disco=len(lista)))
         etiquetas = [t.get("name", "") for t in _lista((a.get("tags") or {}).get("tag") if isinstance(a.get("tags"), dict) else None)]
-        return Album(titulo=(a.get("name") or album).strip(), artista=nome, playcount=_inteiro(a.get("playcount")),
-                     mbid=a.get("mbid") or "", url=a.get("url") or "", url_artista=url_artista(nome),
+        titulo = (a.get("name") or album).strip()
+        return Album(titulo=titulo, artista=nome, playcount=_inteiro(a.get("playcount")),
+                     mbid=a.get("mbid") or "", url=online.url_segura(a.get("url"), DOMINIOS, url_album(nome, titulo)),
+                     url_artista=url_artista(nome),
                      faixas=faixas, etiquetas=[e for e in etiquetas if e])
 
 

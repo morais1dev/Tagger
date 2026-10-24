@@ -245,10 +245,17 @@ def test_respeita_cabecalhos_de_limite_e_espera_no_429():
 
 
 def test_429_persistente_vira_erro():
-    c, rede, _, _ = cliente_discogs({"/database/search?": http_erro("u", 429)})
+    c, rede, _, _ = cliente_discogs({"/database/search?": http_erro("u", 429, cabecalhos={"Retry-After": "1"})})
     with pytest.raises(ErroBusca, match="limitando"):
         c.buscar_releases("a", "b")
     assert len(rede.pedidos) == discogs.TENTATIVAS
+
+
+def test_429_sem_retry_after_tenta_so_mais_uma_vez():
+    c, rede, _, _ = cliente_discogs({"/database/search?": http_erro("u", 429)})
+    with pytest.raises(ErroBusca, match="limitando"):
+        c.buscar_releases("a", "b")
+    assert len(rede.pedidos) == 2
 
 
 def test_cache_discogs_evita_segunda_requisicao():
@@ -425,3 +432,145 @@ def test_ocultar_usa_credenciais_py_quando_existir(monkeypatch):
     monkeypatch.setattr(online, "_ocultar_credenciais", falso)
     assert online.ocultar("x ESPECIAL y", "valorConhecido") == "x *** y"
     assert chamadas == [("valorConhecido",)]
+
+
+# ---------------------------------------------------------------------------
+# Revisão: redirecionamento, links, JSON estranho, numeração, gravadora
+# ---------------------------------------------------------------------------
+
+PROFUNDO = b"[" * 100000 + b"]" * 100000     # aninhamento que estoura a recursão do json
+
+
+def test_authorization_do_discogs_nunca_segue_redirect():
+    c, rede, _, _ = cliente_discogs({"/releases/123": Resposta(VINIL)})
+    c.detalhar_release(123)
+    pedido = rede.pedidos[0]
+    assert not any(k.lower() == "authorization" for k in pedido.headers)      # não é copiado num redirect
+    assert pedido.unredirected_hdrs["Authorization"] == TOKEN
+
+
+@pytest.mark.parametrize("destino", ["http://api.discogs.com/x", "ftp://api.discogs.com/x", "file:///etc/passwd"])
+def test_redirect_para_fora_do_https_e_recusado(destino):
+    h = online._RedirecionamentoSeguro()
+    pedido = urllib.request.Request(f"https://ws.audioscrobbler.com/2.0/?api_key={CHAVE_LASTFM}")
+    with pytest.raises(urllib.error.HTTPError):
+        h.redirect_request(pedido, None, 302, "Found", {}, destino)
+
+
+def test_redirect_com_outra_porta_tira_authorization():
+    h = online._RedirecionamentoSeguro()
+    pedido = urllib.request.Request("https://api.discogs.com/x", headers={"Authorization": TOKEN})
+    novo = h.redirect_request(pedido, None, 302, "Found", {}, "https://api.discogs.com:8443/y")
+    assert not any(k.lower() == "authorization" for k in novo.headers)
+    mesmo = h.redirect_request(pedido, None, 302, "Found", {}, "https://api.discogs.com:443/z")
+    assert mesmo.get_header("Authorization") == TOKEN
+
+
+@pytest.mark.parametrize("url,aceita", [
+    ("https://www.discogs.com/release/1-x", True),
+    ("https://discogs.com/release/1", True),
+    ("javascript:alert(1)", False),
+    ("file:///C:/Windows/win.ini", False),
+    ("httpx://www.discogs.com/release/1", False),
+    ("http://www.discogs.com/release/1", False),
+    ("https://www.discogs.com.evil.com/release/1", False),
+    ("https://evildiscogs.com/release/1", False),
+    ("https://user@www.discogs.com/release/1", False),
+    ("https://evil.com\\@www.discogs.com/", False),
+    ("https://www.discogs.com:8080/release/1", False),
+    ("https://[::1/", False),
+    (None, False), (123, False),
+])
+def test_url_segura(url, aceita):
+    assert online.url_segura(url, discogs.DOMINIOS, "PADRAO") == (url if aceita else "PADRAO")
+
+
+def test_links_falsos_do_json_trocados_pelos_montados():
+    busca_falsa = {"results": [{"id": 5, "title": "A - B", "uri": "javascript:alert(1)"},
+                               {"id": 6, "title": "A - C", "uri": "//evil.com/x"}]}
+    vinil = dict(VINIL, uri="https://www.discogs.com.evil.com/release/123")
+    c, _, _, _ = cliente_discogs({"/database/search?": Resposta(busca_falsa), "/releases/123": Resposta(vinil)})
+    assert [cand.url for cand in c.buscar_releases("a", "b")] == \
+        ["https://www.discogs.com/release/5", "https://www.discogs.com/release/6"]
+    assert c.detalhar_release(123).url == "https://www.discogs.com/release/123"
+    top = {"topalbums": {"album": [{"name": "X", "playcount": "1", "url": "file:///c:/x",
+                                    "artist": {"name": "Banda", "url": "javascript:alert(1)"}}]}}
+    info = {"album": dict(INFO["album"], url="https://last.fm.evil.com/x")}
+    cl, _, _ = cliente_lastfm({"getTopAlbums": Resposta(top), "album.getInfo": Resposta(info)})
+    a = cl.top_albuns("Banda")[0]
+    assert (a.url, a.url_artista) == ("https://www.last.fm/music/Banda/X", "https://www.last.fm/music/Banda")
+    assert cl.detalhar_album("Banda", "Album X").url == "https://www.last.fm/music/Banda/Album+X"
+
+
+@pytest.mark.parametrize("corpo", [
+    [1, 2],
+    {"results": ["texto"]},
+    {"results": [{"id": "abc"}]},
+    {"results": [{"id": "9" * 5000}]},
+    {"results": [{"id": 1, "title": 5}]},
+    pytest.param(PROFUNDO, id="profundo"),
+])
+def test_json_estranho_do_discogs_na_busca_vira_erro_busca(corpo):
+    c, _, _, _ = cliente_discogs({"/database/search?": Resposta(corpo)})
+    with pytest.raises(ErroBusca, match="inválida"):
+        c.buscar_releases("a", "b")
+
+
+@pytest.mark.parametrize("corpo", [
+    {"tracklist": ["x"]},
+    {"tracklist": [{"position": "A1", "title": "x", "artists": ["nome"]}]},
+    {"tracklist": [], "labels": ["selo"]},
+    {"tracklist": [], "artists": [{"name": ["lista"]}]},
+    {"id": "não numérico", "tracklist": []},
+])
+def test_json_estranho_do_discogs_no_release_vira_erro_busca(corpo):
+    c, _, _, _ = cliente_discogs({"/releases/1": Resposta(corpo)})
+    with pytest.raises(ErroBusca, match="inválida"):
+        c.detalhar_release(1)
+
+
+@pytest.mark.parametrize("metodo,corpo", [
+    ("top_albuns", [1]),
+    ("top_albuns", {"topalbums": {"album": ["x"]}}),
+    ("top_albuns", {"topalbums": {"album": [{"name": 5}]}}),
+    ("nome_canonico", {"corrections": {"correction": ["x"]}}),
+    ("detalhar_album", {"album": {"name": "x", "tracks": {"track": ["y"]}}}),
+    pytest.param("detalhar_album", PROFUNDO, id="profundo"),
+])
+def test_json_estranho_do_lastfm_vira_erro_busca(metodo, corpo):
+    c, _, _ = cliente_lastfm({"method=": Resposta(corpo)})
+    with pytest.raises(ErroBusca, match="inválida"):
+        getattr(c, metodo)(*(["Banda", "Album"] if metodo == "detalhar_album" else ["Banda"]))
+
+
+def test_numerar_subfaixas_numericas_seguem_a_contagem():
+    assert numerar(["1", "2", "3", "4a", "4b", "4c", "5"]) == [(1, n) for n in range(1, 8)]
+    assert numerar(["1-1", "1-1", "2-1"]) == [(1, 1), (1, 2), (2, 1)]
+
+
+def test_numerar_romanos_nao_viram_lado():
+    assert interpretar_posicao("I") is None and interpretar_posicao("V") is None
+    assert numerar(["I", "II", "III", "IV"]) == [(1, 1), (1, 2), (1, 3), (1, 4)]
+    assert numerar(["A", "B", "C", "D"]) == [(1, 1), (1, 2), (2, 1), (2, 2)]     # release só de lados
+    assert numerar(["A1", "B1", "I1", "J1"]) == [(1, 1), (1, 2), (5, 1), (5, 2)]  # com número: lado
+
+
+def test_gravadora_entra_no_rascunho_quando_o_campo_existir(monkeypatch):
+    from tagger.nucleo import metadata
+    c, _, _, _ = cliente_discogs({"/releases/123": Resposta(VINIL)})
+    r = c.detalhar_release(123)
+    f = faixa("1.mp3", title="Abertura", album="Disco Raro", albumartist="Banda & Outra", date="1977",
+              tracknumber="1/4", discnumber="1/2", artist="Banda & Outra")
+    assert discogs.montar_alteracoes([f], r) == []                  # sem o campo: nada de gravadora
+    monkeypatch.setattr(metadata, "CAMPOS", {**metadata.CAMPOS, "gravadora": ("Gravadora", None)})
+    assert discogs.montar_alteracoes([f], r) == [(f, {"gravadora": "Selo Independente"})]
+    assert discogs.montar_alteracoes([f], r, campos={"title"}) == []
+    r.gravadora = ""
+    assert discogs.montar_alteracoes([f], r) == []
+
+
+def test_cache_em_disco_nao_deixa_temporario(tmp_path):
+    cache = online.Cache(10 ** 6, pasta=tmp_path)
+    cache.guardar("a", b"corpo", 60)
+    assert [p.suffix for p in tmp_path.iterdir()] == [".json"]
+    assert cache.obter("a") == b"corpo"

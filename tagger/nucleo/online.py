@@ -12,12 +12,14 @@ Nenhum desses serviços fornece capas para o Tagger: as capas vêm só do Cover 
 """
 
 import email.utils
+import functools
 import hashlib
 import json
 import os
 import re
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections import OrderedDict, deque
@@ -172,13 +174,18 @@ class Cache:
                 while sum(len(c) for _e, c in self._memoria.values()) > self.teto_bytes:
                     self._memoria.popitem(last=False)
                 return
+            destino = self._arquivo(chave)
+            temporario = destino.with_name(f"{destino.stem}.{os.getpid()}.{threading.get_ident()}.tmp")
             try:
                 self.pasta.mkdir(parents=True, exist_ok=True)
-                self._arquivo(chave).write_text(
-                    json.dumps({"expira": expira, "corpo": corpo.decode("utf-8")}), "utf-8")
+                temporario.write_text(json.dumps({"expira": expira, "corpo": corpo.decode("utf-8")}), "utf-8")
+                os.replace(temporario, destino)       # quem lê nunca vê um arquivo pela metade
                 self._podar()
             except (OSError, UnicodeDecodeError):
-                pass                      # cache é só otimização: falha não derruba a busca
+                try:                      # cache é só otimização: falha não derruba a busca
+                    temporario.unlink()
+                except OSError:
+                    pass
 
     def _podar(self):
         arquivos = []
@@ -199,12 +206,56 @@ class Cache:
                 pass
 
 
+ERROS_DE_FORMATO = (AttributeError, TypeError, ValueError, KeyError, IndexError, RecursionError)
+
+
+def resposta_invalida(servico):
+    """Decorador das consultas: JSON com tipos inesperados (raiz lista, item que não é dict, número
+    gigante, aninhamento profundo...) vira ErroBusca em vez de derrubar a thread da busca."""
+    def decorar(funcao):
+        @functools.wraps(funcao)
+        def consulta(*args, **kwargs):
+            try:
+                return funcao(*args, **kwargs)
+            except ERROS_DE_FORMATO:
+                from tagger.nucleo.busca import ErroBusca
+                raise ErroBusca(f"Resposta inválida do {servico}.") from None
+        return consulta
+    return decorar
+
+
+def url_segura(url, dominios, padrao=""):
+    """`url` se for https num dos `dominios` (ou subdomínio), sem usuário/senha, porta estranha,
+    barra invertida ou espaço; senão `padrao`. Para links vindos do JSON que a GUI vai abrir."""
+    if not isinstance(url, str) or not url or any(c in url for c in "\\ \t\r\n\x00") or not url.isprintable():
+        return padrao
+    try:
+        partes = urllib.parse.urlsplit(url)
+        porta = partes.port
+    except ValueError:
+        return padrao
+    host = (partes.hostname or "").lower()
+    if (partes.scheme != "https" or "@" in partes.netloc or porta not in (None, 443)
+            or not any(host == d or host.endswith("." + d) for d in dominios)):
+        return padrao
+    return url
+
+
+def _origem(url):
+    partes = urllib.parse.urlsplit(url)
+    return partes.scheme.lower(), (partes.hostname or "").lower(), partes.port or {"https": 443, "http": 80}.get(partes.scheme.lower())
+
+
 class _RedirecionamentoSeguro(urllib.request.HTTPRedirectHandler):
-    """O urllib repassa o Authorization num redirecionamento; para outro host, tira."""
+    """Redirecionamento só para https (a api_key do Last.fm vai na URL). E o urllib repassa o
+    Authorization num redirecionamento: para outra origem (esquema, host, porta), tira.
+    (O Discogs ainda manda o Authorization com add_unredirected_header, que nunca é repassado.)"""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urllib.parse.urlsplit(newurl).scheme.lower() != "https":
+            raise urllib.error.HTTPError(req.full_url, code, "redirecionamento para fora do https recusado", headers, fp)
         novo = super().redirect_request(req, fp, code, msg, headers, newurl)
-        if novo is not None and urllib.parse.urlsplit(newurl).hostname != urllib.parse.urlsplit(req.full_url).hostname:
+        if novo is not None and _origem(newurl) != _origem(req.full_url):
             for nome in list(novo.headers):
                 if nome.lower() == "authorization":
                     del novo.headers[nome]

@@ -28,7 +28,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
-from tagger.nucleo import busca, online
+from tagger.nucleo import busca, metadata, online
 from tagger.nucleo.busca import ErroBusca, FaixaRelease, NAO_ENCONTRADO, USER_AGENT
 
 URL_API = "https://api.discogs.com"
@@ -45,6 +45,8 @@ LIMITE_RESPOSTA = 5 * online.MB
 CACHE_SEGUNDOS = 60 * 60          # bem abaixo do teto de 6 h das regras
 TETO_CACHE = 6 * 60 * 60
 SEM_CREDENCIAL = "Busca no Discogs desativada: configure uma chave nas Configurações."
+DOMINIOS = ("discogs.com",)       # links do JSON só são aceitos nesses hosts (a GUI vai abri-los)
+CAMPO_GRAVADORA = "gravadora"     # só é preenchido quando existir em metadata.CAMPOS
 
 LIMITADOR = online.LimitadorJanela(MAXIMO_POR_MINUTO, JANELA, intervalo=JANELA / MAXIMO_POR_MINUTO)
 CACHE = online.Cache(8 * online.MB, teto_segundos=TETO_CACHE)       # só memória, compartilhado
@@ -110,6 +112,7 @@ def interpretar_posicao(texto):
     ("lado", letra, nº no lado) para vinil/fita: "A1" -> ("lado", "A", 1), "B" -> ("lado", "B", 0);
     ("disco", disco, faixa) para "2-05", "CD2.5", "1/3";
     ("faixa", None, n) para "7"; None se não der para entender (vazio, "Video" etc.).
+    I, V e X sem número são tratados como algarismos romanos (None): ver `numerar`.
     """
     texto = (texto or "").strip()
     if not texto:
@@ -121,7 +124,7 @@ def interpretar_posicao(texto):
     if m:
         return ("faixa", None, int(m.group(1)))
     m = _LADO.fullmatch(texto)
-    if m:
+    if m and (m.group(2) or m.group(1).upper() not in "IVX"):
         return ("lado", m.group(1).upper(), int(m.group(2) or 0))
     return None
 
@@ -131,19 +134,30 @@ def numerar(posicoes):
     [(disco, faixa)] para as posições na ordem do release.
     Vinil: cada disco tem dois lados (A/B = disco 1, C/D = disco 2...) e a faixa conta em ordem
     dentro do disco: A1, A2, B1 -> 1, 2, 3. Posição incompreensível: segue a ordem do disco atual.
+    Sub-faixas numéricas ("4a", "4b") e números repetidos no disco também seguem a contagem.
+    Letras sem número só são lados se o release inteiro for de lados ("A", "B"...): assim
+    "I", "II", "III" não viram o lado I (disco 5).
     """
-    contagem, saida, disco = {}, [], 1
+    posicoes = [(p or "").strip() for p in posicoes]
+    preenchidas = [p for p in posicoes if p]
+    so_lados = bool(preenchidas) and all(re.fullmatch(r"[A-Za-z]", p) for p in preenchidas)
+    contagem, usados, saida, disco = {}, set(), [], 1
     for pos in posicoes:
         tipo = interpretar_posicao(pos)
-        if tipo and tipo[0] == "disco":
-            disco, numero = tipo[1] or 1, tipo[2]
-        elif tipo and tipo[0] == "faixa":
+        if tipo is None and so_lados and pos:
+            tipo = ("lado", pos.upper(), 0)
+        if tipo and tipo[0] in ("disco", "faixa"):
+            if tipo[0] == "disco":
+                disco = tipo[1] or 1
             numero = tipo[2]
+            if (disco, numero) in usados or not numero:
+                numero = contagem.get(disco, 0) + 1
         else:
             if tipo:                                      # lado
                 disco = (ord(tipo[1]) - ord("A")) // 2 + 1
             numero = contagem.get(disco, 0) + 1
         contagem[disco] = max(contagem.get(disco, 0), numero)
+        usados.add((disco, numero))
         saida.append((disco, numero))
     return saida
 
@@ -234,8 +248,8 @@ class ClienteDiscogs:
         for tentativa in range(TENTATIVAS):
             self._limitador.esperar()
             pedido = urllib.request.Request(url, headers={
-                "User-Agent": USER_AGENT, "Accept": "application/vnd.discogs.v2.discogs+json",
-                "Authorization": self._authorization})
+                "User-Agent": USER_AGENT, "Accept": "application/vnd.discogs.v2.discogs+json"})
+            pedido.add_unredirected_header("Authorization", self._authorization)   # nunca segue um redirect
             try:
                 with self._abrir(pedido, timeout=TIMEOUT) as resposta:
                     self._ler_limite(getattr(resposta, "headers", None))
@@ -243,9 +257,10 @@ class ClienteDiscogs:
             except urllib.error.HTTPError as erro:
                 self._ler_limite(erro.headers)
                 if erro.code == 429 and tentativa < TENTATIVAS - 1:
-                    espera = online._inteiro((erro.headers or {}).get("Retry-After")) or JANELA
-                    self._limitador.bloquear(min(espera, ESPERA_MAXIMA))
-                    continue
+                    espera = online._inteiro((erro.headers or {}).get("Retry-After"))
+                    if espera or tentativa == 0:             # sem Retry-After: só uma nova tentativa
+                        self._limitador.bloquear(min(espera or JANELA, ESPERA_MAXIMA))
+                        continue
                 raise self._erro_http(erro) from None
             except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as erro:
                 raise online.erro_busca("Sem conexão com o Discogs. Verifique a internet.", self._ocultar(erro)) from None
@@ -269,10 +284,11 @@ class ClienteDiscogs:
         corpo = self._requisitar(caminho, **params)
         try:
             return json.loads(corpo.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
+        except (ValueError, UnicodeDecodeError, RecursionError):
             raise ErroBusca("Resposta inválida do Discogs.") from None
 
     # ------------------------------------------------------------ consultas
+    @online.resposta_invalida("Discogs")
     def buscar_releases(self, artista="", album="", titulo="", limite=10):
         """Candidatos para artista/álbum (o título da faixa só entra se não houver álbum)."""
         params = {"type": "release", "per_page": limite}
@@ -292,15 +308,16 @@ class ClienteDiscogs:
             artista_r, _, titulo_r = (r.get("title") or "").partition(" - ")
             if not titulo_r:                    # sem " - ": o título inteiro é o do álbum
                 artista_r, titulo_r = "", artista_r
-            uri = r.get("uri") or ""
+            id_r = int(r["id"])
             candidatos.append(Candidato(
-                id=int(r["id"]), titulo=titulo_r.strip(), artista=_SUFIXO_DESAMBIGUACAO.sub("", artista_r.strip()),
+                id=id_r, titulo=titulo_r.strip(), artista=_SUFIXO_DESAMBIGUACAO.sub("", artista_r.strip()),
                 ano=str(r.get("year") or ""), pais=r.get("country") or "",
                 formato=", ".join(dict.fromkeys(r.get("format") or [])),
                 gravadora=(r.get("label") or [""])[0], catalogo=r.get("catno") or "",
-                url=uri if uri.startswith("http") else (URL_SITE + uri if uri else "")))
+                url=_link(r.get("uri"), id_r)))
         return candidatos
 
+    @online.resposta_invalida("Discogs")
     def detalhar_release(self, id_release):
         r = self._json(f"releases/{int(id_release)}")
         entradas = []
@@ -323,14 +340,22 @@ class ClienteDiscogs:
             posicao=(e.get("position") or "").strip(), duracao=_duracao(e.get("duration")))
             for e, (disco, numero) in zip(entradas, numeros)]
         rotulos = r.get("labels") or []
+        id_r = int(r.get("id") or id_release)
         return Release(
-            id=int(r.get("id") or id_release), titulo=(r.get("title") or "").strip(), artista=artista,
+            id=id_r, titulo=(r.get("title") or "").strip(), artista=artista,
             data=_data(r.get("released"), r.get("year")),
             gravadora=_SUFIXO_DESAMBIGUACAO.sub("", rotulos[0].get("name", "")) if rotulos else "",
             catalogo=rotulos[0].get("catno", "") if rotulos else "",
             estilos=list(dict.fromkeys((r.get("styles") or []) + (r.get("genres") or []))),
             total_discos=max(totais) if totais else 1, faixas=faixas,
-            url=r.get("uri") or f"{URL_SITE}/release/{int(id_release)}")
+            url=_link(r.get("uri"), id_r))
+
+
+def _link(uri, id_release):
+    """Página do release: a do JSON se for https num host do Discogs; senão a montada pelo id."""
+    if isinstance(uri, str) and uri.startswith("/") and not uri.startswith("//"):
+        uri = URL_SITE + uri
+    return online.url_segura(uri, DOMINIOS, f"{URL_SITE}/release/{int(id_release)}")
 
 
 # ---------------------------------------------------------------------------
@@ -385,8 +410,21 @@ def casar_faixas(faixas, release, valor=None):
 
 
 def analisar(faixas, release, campos=None, valor=None):
-    """(alteracoes, casadas, sem_par), no mesmo formato de busca.analisar (vai para Rascunho.definir_por_faixa)."""
-    return busca.analisar(faixas, release, campos, valor, casar=_casar)
+    """(alteracoes, casadas, sem_par), no mesmo formato de busca.analisar (vai para Rascunho.definir_por_faixa).
+    Além dos campos do MusicBrainz, a gravadora, quando o campo existir em metadata.CAMPOS."""
+    valor = valor or busca._valor_padrao
+    itens, casadas, sem_par = busca.analisar(faixas, release, campos, valor, casar=_casar)
+    campo = CAMPO_GRAVADORA
+    if release.gravadora and campo in metadata.CAMPOS and (campos is None or campo in campos):
+        por_faixa = {id(f): m for f, m in itens}
+        itens = []
+        for f in casadas:
+            mudancas = dict(por_faixa.get(id(f), {}))
+            if valor(f, campo) != release.gravadora:
+                mudancas[campo] = release.gravadora
+            if mudancas:
+                itens.append((f, mudancas))
+    return itens, casadas, sem_par
 
 
 def montar_alteracoes(faixas, release, campos=None, valor=None):
