@@ -26,7 +26,7 @@ from mutagen import MutagenError
 from mutagen.flac import FLAC
 from mutagen.id3 import delete as apagar_id3
 from mutagen.id3 import (
-    APIC, COMM, TALB, TCOM, TCON, TDRC, TEXT, TIT2, TPE1, TPE2, TPOS, TRCK, USLT,
+    APIC, COMM, TALB, TCOM, TCON, TDRC, TEXT, TIT2, TPE1, TPE2, TPOS, TPUB, TRCK, USLT,
 )
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
@@ -72,13 +72,14 @@ CAMPOS = {
     "lyricist":    ("Letrista",         TEXT),
     "comment":     ("Comentário",       COMM),
     "lyrics":      ("Letra",            USLT),
+    "gravadora":   ("Gravadora",        TPUB),
 }
 
 # Campos que fazem sentido aplicar igual em vários arquivos de uma vez.
 # (Título, faixa e letra são únicos por música, então ficam de fora.)
 CAMPOS_BULK = [
     "artist", "album", "albumartist", "discnumber", "date",
-    "genre", "composer", "lyricist", "comment",
+    "genre", "composer", "lyricist", "comment", "gravadora",
 ]
 
 # Campos em que "A; B" vira vários valores ao salvar (se MULTIVALOR estiver ligado).

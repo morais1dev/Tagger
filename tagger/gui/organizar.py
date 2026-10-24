@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from tagger.gui.padrao import DialogoPadrao
-from tagger.nucleo.organizar import PlanoOrganizar, planejar_organizacao, resumo_movimentos
+from tagger.nucleo.organizar import PlanoOrganizar, planejar_organizacao, resumo_falhas, resumo_movimentos
 from tagger.nucleo.padroes import campos_do_padrao
 
 
@@ -117,16 +117,20 @@ class DialogoResumoOrganizar(QDialog):
         self.setWindowTitle("Arquivos organizados")
         self.setMinimumSize(420, 300)
 
-        titulo = f"{len(feitos)} arquivo(s) movido(s) para {self.pasta}"
+        if feitos:
+            titulo = f"{len(feitos)} arquivo(s) movido(s) para {self.pasta}"
+        else:
+            titulo = "Nenhum arquivo foi movido."
         if falhas:
-            titulo += f" · {len(falhas)} não foram movidos e continuam onde estavam"
+            titulo += f"{' · ' if feitos else ' '}{len(falhas)} não foram movidos e continuam onde estavam:"
         rotulo = QLabel(titulo)
         rotulo.setWordWrap(True)
         rotulo.setProperty("papel", "ajuda")
 
-        linhas = resumo_movimentos(feitos, self.pasta)
+        # movidos (origem -> destino) e, no fim, as falhas (arquivo -> motivo)
+        linhas = resumo_movimentos(feitos, self.pasta) + resumo_falhas(falhas, self.pasta)
         tabela = QTableWidget(len(linhas), 2)
-        tabela.setHorizontalHeaderLabels(["Era", "Agora está em"])
+        tabela.setHorizontalHeaderLabels(["Era", "Agora está em" if feitos else "Motivo"])
         tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
         tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
         tabela.verticalHeader().setVisible(False)

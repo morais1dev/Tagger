@@ -6,6 +6,8 @@ All notable changes to Tagger are listed here. Versions follow [Semantic Version
 
 ### Added
 - After **Organize into folders**, a summary shows where each file went (was → now in) with an **Open folder** button. The list and the breadcrumb follow the files to the new folder.
+- **Label** ("Gravadora") tag for MP3 (`TPUB`), FLAC/Ogg (`ORGANIZATION`, also reads `LABEL`) and M4A (`LABEL` free-form atom, as Picard writes it). It shows in the editor panel and as an optional column, and works with pending changes.
+- **Group by album** (Settings → Behavior, off by default): with more than one album loaded, the list shows a header per album ("Album — Album artist, year", with the track count) and orders the tracks by disc and track. Selection, filter, in-cell editing and the row actions work as before; the header is not a track.
 
 ### Changed
 - The window can now be much smaller (down to 600×320, was 960×600): the top bar drops the app name and shrinks the filter and Save button, the editor panel can be narrower and the empty screen scrolls on short windows.

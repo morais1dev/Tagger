@@ -22,7 +22,7 @@ from tagger.nucleo.metadata import (
     listar_audios, mtime_atual, nomes_formatos, rotulo, validar_valor,
 )
 from tagger.nucleo.organizar import (
-    executar_movimentos, executar_organizacao, pasta_comum, remover_pastas_vazias,
+    executar_movimentos, executar_organizacao, pasta_apos_mover, remover_pastas_vazias,
 )
 from tagger.nucleo.padroes import ItemRenomear, executar_renomeacao
 from tagger import __version__
@@ -244,6 +244,7 @@ class JanelaPrincipal(QMainWindow):
         self._limpador = None
         self._movedor = None
         self._mtimes_antes, self._itens_movendo, self._pilha_movendo, self._desfazendo = {}, [], None, None
+        self._pastas_do_movimento = ()   # (pasta aberta antes de organizar, destino): a migalha segue ao desfazer
         self._pastas_criadas = set()     # pastas de destino que o Tagger criou (para limpar ao desfazer)
         self._modo_carregar = "substituir"   # "substituir" | "adicionar" | "recarregar"
         self._config_pendente = None
@@ -273,6 +274,7 @@ class JanelaPrincipal(QMainWindow):
         rolagem = QScrollArea()           # em janelas baixas a tela vazia rola em vez de impor altura mínima
         rolagem.setWidgetResizable(True)
         rolagem.setFrameShape(QFrame.NoFrame)
+        rolagem.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         rolagem.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; }")
         rolagem.setWidget(self.tela_vazia)
         self.telas.addWidget(rolagem)
@@ -292,6 +294,7 @@ class JanelaPrincipal(QMainWindow):
 
         self.tela_vazia.definir_recentes(self._recentes())
         self.tela_vazia.definir_subpastas(self.config["subpastas"])
+        self.tabela.definir_agrupar(self.config["agrupar_por_album"])
         self.aplicar_tema()
         self._atualizar_generos()
         self._atualizar_estado()
@@ -300,7 +303,8 @@ class JanelaPrincipal(QMainWindow):
         if not geometria or not self.restoreGeometry(geometria):
             self._geometria_inicial()
         self._encaixar_na_tela()
-        cabecalho = self.settings.value("cabecalho_v3")
+        self.settings.remove("cabecalho_v3")      # layout antigo: a coluna Gravadora mudou os índices
+        cabecalho = self.settings.value("cabecalho_v4")
         if cabecalho:
             self.tabela.restaurar_cabecalho(cabecalho)
         if str(self.settings.value("painel_visivel", True)).lower() in ("false", "0"):
@@ -642,6 +646,7 @@ class JanelaPrincipal(QMainWindow):
         if anterior.get("generos") != self.config.get("generos"):
             self._atualizar_generos()
         self.tela_vazia.definir_subpastas(self.config["subpastas"])
+        self.tabela.definir_agrupar(self.config["agrupar_por_album"])
 
     def _aplicar_config_metadata(self):
         """Opções de gravação ficam no módulo metadata (a CLI usa os padrões de lá)."""
@@ -1029,6 +1034,7 @@ class JanelaPrincipal(QMainWindow):
             feitos, falhas = resultado
             self._pastas_criadas.update(criadas)
             self._aplicar_renomeacao(dict(feitos), self._mtimes_antes)
+            self._seguir_arquivos_movidos(*self._pastas_do_movimento)
             if feitos:
                 pilha_oposta.append(Renomeacao(feitos))
             if falhas:        # o que não voltou continua no histórico para tentar de novo
@@ -1068,6 +1074,7 @@ class JanelaPrincipal(QMainWindow):
             feitos = [(i.origem, i.destino) for i in self._itens_movendo
                       if not i.origem.exists() and i.destino.exists()]
             self._aplicar_renomeacao(dict(feitos), self._mtimes_antes)
+            self._seguir_arquivos_movidos(*self._pastas_do_movimento)
             if feitos and self._pilha_movendo is not None:
                 self._pilha_movendo.append(Renomeacao(feitos))
             if self._desfazendo is None:
@@ -1225,6 +1232,7 @@ class JanelaPrincipal(QMainWindow):
             return
         self._lembrar_padrao("organizar", dialogo.padrao)
         plano, remover, raiz, criadas = dialogo.plano, dialogo.remover_vazias, self.pasta_atual, []
+        self._pastas_do_movimento = (raiz, plano.pasta)       # onde as faixas estavam e para onde vão (desfazer/refazer)
 
         def concluir(resultado):
             feitos, falhas, removidas = resultado
@@ -1241,22 +1249,19 @@ class JanelaPrincipal(QMainWindow):
                 self.avisar(f"{len(feitos)} movido(s), {len(falhas)} falharam (em uso?): {nomes}{extra}", erro=True)
             else:
                 self.avisar(f"{len(feitos)} arquivo(s) movido(s){extra} — Ctrl+Z desfaz", ok=True)
-            self._seguir_arquivos_movidos(plano.pasta, feitos)
+            self._seguir_arquivos_movidos(plano.pasta)
             if feitos or falhas:
                 DialogoResumoOrganizar(feitos, falhas, plano.pasta, self).exec()
 
         self._mover_em_segundo_plano(lambda: executar_organizacao(plano, remover, raiz, criadas), concluir,
                                      f"Movendo {len(plano.validos())} arquivos…", plano.validos(), self.pilha_desfazer)
 
-    def _seguir_arquivos_movidos(self, destino, feitos):
-        """Se os arquivos saíram da pasta aberta, a migalha (e o F5) passam a apontar para a pasta nova."""
-        if not feitos or self.pasta_atual is None:
-            return
-        comum = pasta_comum([f.caminho for f in self.modelo.faixas])
-        if comum is None or comum == self.pasta_atual or self.pasta_atual in comum.parents:
-            return
-        self.pasta_atual = comum if destino in (comum, *comum.parents) else Path(destino)
-        self._atualizar_migalha()
+    def _seguir_arquivos_movidos(self, *preferidas):
+        """Migalha (e F5) acompanham os arquivos quando saem da pasta aberta (ver nucleo.pasta_apos_mover)."""
+        nova = pasta_apos_mover(self.pasta_atual, [f.caminho for f in self.modelo.faixas], preferidas)
+        if nova != self.pasta_atual:
+            self.pasta_atual = nova
+            self._atualizar_migalha()
 
     def buscar_tags_online(self):
         selecionadas = self._faixas_selecionadas()
@@ -1571,7 +1576,7 @@ class JanelaPrincipal(QMainWindow):
             return
         self.settings.setValue("geometria", self.saveGeometry())
         self.settings.setValue("divisor", self.divisor.saveState())
-        self.settings.setValue("cabecalho_v3", self.tabela.estado_cabecalho())
+        self.settings.setValue("cabecalho_v4", self.tabela.estado_cabecalho())
         if self._carregador is not None:
             self._carregador.wait(3000)
         super().closeEvent(evento)

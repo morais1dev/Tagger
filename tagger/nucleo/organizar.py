@@ -301,6 +301,11 @@ def resumo_movimentos(feitos, base):
     return sorted(linhas, key=lambda linha: linha[1].lower())
 
 
+def resumo_falhas(falhas, base):
+    """Linhas arquivo → motivo do que não foi movido: [(origem, "Não movido: motivo")], como em resumo_movimentos."""
+    return [(str(_relativo(o, base)), f"Não movido: {erro}") for o, erro in falhas.items()]
+
+
 def pastas_de_destino(feitos):
     """Pastas onde os arquivos movidos foram parar (sem repetir, na ordem em que aparecem)."""
     return list(dict.fromkeys(d.parent for _o, d in feitos))
@@ -313,3 +318,25 @@ def pasta_comum(caminhos):
         return Path(os.path.commonpath(pastas)) if pastas else None
     except ValueError:
         return None
+
+
+def pasta_apos_mover(pasta_atual, caminhos, preferidas=()):
+    """
+    Pasta que a migalha deve mostrar depois de mover arquivos. `caminhos`: onde as faixas da lista estão agora.
+    - continua a pasta aberta se ainda há alguma faixa dentro dela (movimento parcial);
+    - senão, a primeira das `preferidas` (ex.: o destino escolhido) que contém a pasta comum das faixas;
+    - senão, a própria pasta comum. Sem pasta comum, nada muda.
+    """
+    if pasta_atual is None:
+        return None
+    pasta_atual = Path(pasta_atual)
+    caminhos = [Path(c) for c in caminhos]
+    if any(_dentro_de(c, pasta_atual) for c in caminhos):
+        return pasta_atual
+    comum = pasta_comum(caminhos)
+    if comum is None:
+        return pasta_atual
+    for pasta in preferidas:
+        if pasta is not None and (_chave(pasta) == _chave(comum) or _dentro_de(comum, pasta)):
+            return Path(pasta)
+    return comum

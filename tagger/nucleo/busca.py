@@ -315,7 +315,7 @@ def _data(texto):
     return texto[:4] if texto[:4].isdigit() else ""
 
 
-def analisar(faixas, release, campos=None, valor=None):
+def analisar(faixas, release, campos=None, valor=None, casar=None):
     """
     (alteracoes, casadas, sem_par). Só as faixas que casaram com o release recebem alguma coisa
     (inclusive os campos do álbum): assim, selecionar dois álbuns não estraga o outro.
@@ -323,12 +323,13 @@ def analisar(faixas, release, campos=None, valor=None):
     `campos`: conjunto de campos a preencher (padrão: todos).
     `valor(faixa, campo)`: o que o usuário está vendo (ex.: Rascunho.valor); padrão: tags do arquivo.
     Faixa casada só pelo número, com título muito diferente, não tem o título trocado.
+    `casar(faixas, release, valor)`: troca o casamento (o Discogs confia mais na ordem); padrão: `_casar`.
     """
     valor = valor or _valor_padrao
     do_album = {"album": release.titulo, "albumartist": release.artista, "date": _data(release.data),
                 "genre": "; ".join(release.generos)}
     itens, casadas, sem_par = [], [], []
-    for faixa, par, por_titulo in _casar(faixas, release, valor):
+    for faixa, par, por_titulo in (casar or _casar)(faixas, release, valor):
         if par is None:
             sem_par.append(faixa)
             continue
