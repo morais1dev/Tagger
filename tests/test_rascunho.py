@@ -169,3 +169,11 @@ def test_migrar_historico(tmp_path):
     assert pilha[0] == [(b, {"title": ""}, SEM_CAPA)]
     assert pilha[1].pares == [(c, b)]
     assert pilha[1].inversa().pares == [(b, c)]
+
+
+def test_gravadora_no_rascunho(faixas):
+    r = Rascunho()
+    r.definir(faixas, "gravadora", "Selo")
+    assert r.valor(faixas[0], "gravadora") == "Selo"
+    _salvar(r, faixas)
+    assert carregar(faixas[0].caminho).tags["gravadora"] == "Selo"

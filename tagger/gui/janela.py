@@ -285,6 +285,7 @@ class JanelaPrincipal(QMainWindow):
 
         self.tela_vazia.definir_recentes(self._recentes())
         self.tela_vazia.definir_subpastas(self.config["subpastas"])
+        self.tabela.definir_agrupar(self.config["agrupar_por_album"])
         self.aplicar_tema()
         self._atualizar_generos()
         self._atualizar_estado()
@@ -293,7 +294,8 @@ class JanelaPrincipal(QMainWindow):
         if not geometria or not self.restoreGeometry(geometria):
             self._geometria_inicial()
         self._encaixar_na_tela()
-        cabecalho = self.settings.value("cabecalho_v3")
+        self.settings.remove("cabecalho_v3")      # layout antigo: a coluna Gravadora mudou os índices
+        cabecalho = self.settings.value("cabecalho_v4")
         if cabecalho:
             self.tabela.restaurar_cabecalho(cabecalho)
         if str(self.settings.value("painel_visivel", True)).lower() in ("false", "0"):
@@ -631,6 +633,7 @@ class JanelaPrincipal(QMainWindow):
         if anterior.get("generos") != self.config.get("generos"):
             self._atualizar_generos()
         self.tela_vazia.definir_subpastas(self.config["subpastas"])
+        self.tabela.definir_agrupar(self.config["agrupar_por_album"])
 
     def _aplicar_config_metadata(self):
         """Opções de gravação ficam no módulo metadata (a CLI usa os padrões de lá)."""
@@ -1547,7 +1550,7 @@ class JanelaPrincipal(QMainWindow):
             return
         self.settings.setValue("geometria", self.saveGeometry())
         self.settings.setValue("divisor", self.divisor.saveState())
-        self.settings.setValue("cabecalho_v3", self.tabela.estado_cabecalho())
+        self.settings.setValue("cabecalho_v4", self.tabela.estado_cabecalho())
         if self._carregador is not None:
             self._carregador.wait(3000)
         super().closeEvent(evento)

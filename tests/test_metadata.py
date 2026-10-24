@@ -86,6 +86,14 @@ def test_salvar_e_reler(mp3):
     assert _tags(mp3).version == (2, 3, 0)
 
 
+def test_gravadora_mp3(mp3):
+    salvar(mp3, {"gravadora": "Selo; Dois"})
+    assert str(_tags(mp3)["TPUB"]) == "Selo; Dois"          # TPUB não é multivalor
+    assert carregar(mp3).tags["gravadora"] == "Selo; Dois"
+    salvar(mp3, {"gravadora": ""})
+    assert "TPUB" not in _tags(mp3) and carregar(mp3).tags["gravadora"] == ""
+
+
 def test_valor_vazio_remove_e_varios_ignora(mp3):
     salvar(mp3, {"title": "A", "artist": "B"})
     salvar(mp3, {"title": "", "artist": VARIOS})
@@ -364,7 +372,8 @@ def test_outro_ler_nao_grava(outro):
 def test_outro_salvar_e_reler(outro):
     valores = {"title": "Música", "artist": "A; B", "album": "Álbum", "albumartist": "Vários",
                "tracknumber": "3/12", "discnumber": "1/2", "date": "2024-05-17", "genre": "Rock; Pop",
-               "composer": "C", "lyricist": "L1; L2", "comment": "linha 1\nlinha 2", "lyrics": "lá lá\nlá"}
+               "composer": "C", "lyricist": "L1; L2", "comment": "linha 1\nlinha 2", "lyrics": "lá lá\nlá",
+               "gravadora": "Selo; Dois"}
     salvar(outro, valores)
     assert carregar(outro).tags == valores
 
@@ -596,3 +605,43 @@ def test_outro_arquivo_invalido(tmp_path):
 def test_textos_de_formatos():
     assert metadata.curingas_audio() == ("*.flac", "*.m4a", "*.mp3", "*.mp4", "*.ogg")
     assert metadata.nomes_formatos() == "FLAC, M4A, MP3, MP4, OGG"
+
+
+# ----------------------------------------------------------------- gravadora
+CHAVE_GRAVADORA = {".flac": "ORGANIZATION", ".ogg": "ORGANIZATION", ".m4a": "----:com.apple.iTunes:LABEL"}
+
+
+def test_gravadora_outro_gravar_e_apagar(outro):
+    chave = CHAVE_GRAVADORA[outro.suffix]
+    salvar(outro, {"gravadora": "Selo"})
+    assert carregar(outro).tags["gravadora"] == "Selo"
+    valor = _abrir(outro).tags[chave][0]
+    assert (bytes(valor).decode() if outro.suffix == ".m4a" else valor) == "Selo"
+    salvar(outro, {"gravadora": ""})
+    assert carregar(outro).tags["gravadora"] == "" and chave not in _abrir(outro).tags
+
+
+@pytest.mark.parametrize("fmt", ["flac", "ogg"])
+def test_gravadora_vorbis_le_label(criar_audio, fmt):
+    caminho = criar_audio(fmt)
+    audio = _abrir(caminho)
+    if audio.tags is None:
+        audio.add_tags()
+    audio.tags["LABEL"] = ["Selo Antigo"]
+    audio.save()
+    assert carregar(caminho).tags["gravadora"] == "Selo Antigo"
+    salvar(caminho, {"gravadora": "Novo"})            # troca o que foi exibido, sem deixar o LABEL velho
+    tags = _abrir(caminho).tags
+    assert list(tags["ORGANIZATION"]) == ["Novo"] and "LABEL" not in tags
+    salvar(caminho, {"gravadora": ""})
+    assert carregar(caminho).tags["gravadora"] == ""
+
+
+def test_gravadora_vorbis_organization_tem_prioridade(criar_audio):
+    caminho = criar_audio("flac")
+    audio = FLAC(caminho)
+    audio.add_tags()
+    audio.tags["ORGANIZATION"] = ["Principal"]
+    audio.tags["LABEL"] = ["Outro"]
+    audio.save()
+    assert carregar(caminho).tags["gravadora"] == "Principal"
