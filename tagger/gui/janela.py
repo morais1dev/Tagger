@@ -434,6 +434,7 @@ class JanelaPrincipal(QMainWindow):
             botao.setProperty("tipo", "fantasma" if compacta else None)
             tema.repolir(botao)
         self.busca.setMinimumWidth(60 if compacta else 220)
+        self.btn_online.parentWidget().layout().setSpacing(6 if compacta else 8)   # cabe em 600 px com "Buscar online"
         self.lbl_nome_app.setVisible(not compacta)
         self._fixar_largura_salvar()
 
@@ -601,7 +602,7 @@ class JanelaPrincipal(QMainWindow):
         self.logo.setPixmap(pixmap("musica", cores["on_accent"], 15, espessura=2.4))
         self.btn_abrir.setIcon(icone("pasta", cores["text"]))
         self.btn_adicionar.setIcon(icone("arquivo+", cores["text"]))
-        self.btn_online.setIcon(icone("busca", cores["text"]))
+        self.btn_online.setIcon(icone("globo", cores["text"]))
         self.btn_painel.setIcon(icone("painel", cores["muted"]))
         self.btn_desfazer.setIcon(icone("desfazer", cores["muted"]))
         self.btn_refazer.setIcon(icone("refazer", cores["muted"]))
