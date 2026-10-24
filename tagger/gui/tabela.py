@@ -269,12 +269,17 @@ class FiltroFaixas(QSortFilterProxyModel):
         super().__init__(parent)
         self._texto = ""
         self.agrupar = False
+        self._cache_tags = {}
         self.setSortRole(PAPEL_ORDEM)
         # editar álbum/disco/faixa muda o grupo da linha: reordena depois que o Qt terminar a edição
         self._timer_regrupar = QTimer(self, singleShot=True, interval=0)
         self._timer_regrupar.timeout.connect(self.invalidate)
 
     def setSourceModel(self, modelo):
+        # o cache é limpo antes de o proxy reagir às mudanças da origem (a conexão do proxy vem depois)
+        for sinal in (modelo.dataChanged, modelo.rowsInserted, modelo.rowsRemoved, modelo.modelReset,
+                      modelo.layoutChanged):
+            sinal.connect(self._cache_tags.clear)
         super().setSourceModel(modelo)
         modelo.dataChanged.connect(lambda *_: self.agrupar and self._timer_regrupar.start())
 
@@ -289,9 +294,12 @@ class FiltroFaixas(QSortFilterProxyModel):
 
     def tags_da_linha(self, linha):
         """Tags (com o rascunho aplicado) da linha de origem, só os campos usados no agrupamento."""
-        modelo = self.sourceModel()
-        faixa = modelo.faixas[linha]
-        return {campo: modelo.rascunho.valor(faixa, campo) for campo in CAMPOS_GRUPO}
+        tags = self._cache_tags.get(linha)
+        if tags is None:
+            modelo = self.sourceModel()
+            faixa = modelo.faixas[linha]
+            tags = self._cache_tags[linha] = {campo: modelo.rascunho.valor(faixa, campo) for campo in CAMPOS_GRUPO}
+        return tags
 
     def lessThan(self, esquerda, direita):
         if not self.agrupar:
@@ -416,9 +424,11 @@ class TabelaFaixas(QTableView):
         self._ordem_automatica = False     # a ordenação por Nº foi posta pelo agrupamento, não pelo usuário
         self._timer_grupos = QTimer(self, singleShot=True, interval=0)
         self._timer_grupos.timeout.connect(self._atualizar_grupos)
-        for sinal in (filtro.layoutChanged, filtro.rowsInserted, filtro.rowsRemoved, filtro.modelReset,
-                      filtro.dataChanged):
+        self._ordem_anterior = (-1, Qt.AscendingOrder)   # ordenação do usuário, guardada enquanto agrupa
+        self._mudando_ordem = False
+        for sinal in (filtro.rowsInserted, filtro.rowsRemoved, filtro.modelReset, filtro.dataChanged):
             sinal.connect(lambda *_: self._timer_grupos.start())
+        filtro.layoutChanged.connect(lambda *_: self._atualizar_grupos())     # síncrono: sem piscar ao reordenar
 
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -451,6 +461,7 @@ class TabelaFaixas(QTableView):
         # começa na ordem em que os arquivos foram carregados (sem coluna ordenada)
         cabecalho.setSortIndicator(-1, Qt.AscendingOrder)
         self.setSortingEnabled(True)
+        cabecalho.sortIndicatorChanged.connect(self._ordem_mudou)
 
     # ----- colunas -----
     def colunas_padrao(self):
@@ -538,7 +549,7 @@ class TabelaFaixas(QTableView):
         self.delegado.altura_cabecalho = max(24, altura_linha - 2)
         self.verticalHeader().setDefaultSectionSize(altura_linha)
         self.horizontalHeader().setFixedHeight(altura_cabecalho)
-        self._atualizar_grupos(forcar=True)
+        self._atualizar_grupos()
 
     # ----- agrupar por álbum -----
     def definir_agrupar(self, ligado):
@@ -548,18 +559,55 @@ class TabelaFaixas(QTableView):
         if ligado == filtro.agrupar:
             return
         cabecalho = self.horizontalHeader()
-        coluna = CHAVES.index("tracknumber")
-        if ligado and cabecalho.sortIndicatorSection() < 0:
+        if ligado:
+            # dentro de cada álbum a ordem é disco > faixa: a ordenação do usuário volta ao desligar
+            self._ordem_anterior = (cabecalho.sortIndicatorSection(), cabecalho.sortIndicatorOrder())
             self._ordem_automatica = True
-            cabecalho.setSortIndicator(coluna, Qt.AscendingOrder)
-        elif not ligado and self._ordem_automatica and cabecalho.sortIndicatorSection() == coluna:
-            cabecalho.setSortIndicator(-1, Qt.AscendingOrder)
+            self._definir_ordem(CHAVES.index("tracknumber"), Qt.AscendingOrder)
+        elif self._ordem_automatica:
+            self._definir_ordem(*self._ordem_anterior)
         if not ligado:
             self._ordem_automatica = False
         filtro.definir_agrupar(ligado)
         self._atualizar_grupos()
 
-    def _atualizar_grupos(self, forcar=False):
+    def _definir_ordem(self, coluna, ordem):
+        self._mudando_ordem = True
+        try:
+            self.horizontalHeader().setSortIndicator(coluna, ordem)
+        finally:
+            self._mudando_ordem = False
+
+    def _ordem_mudou(self, *_):
+        if not self._mudando_ordem:
+            self._ordem_automatica = False      # o usuário escolheu a ordem: não desfazer ao desligar
+
+    def _limites_grupo(self, linha):
+        """Primeira e última linha (da tela) do álbum que contém `linha`."""
+        inicios = sorted(self.delegado.cabecalhos)
+        inicio = max((i for i in inicios if i <= linha), default=0)
+        fim = min((i for i in inicios if i > linha), default=self.model().rowCount()) - 1
+        return inicio, fim
+
+    def _no_cabecalho(self, evento):
+        y = evento.position().toPoint().y()
+        linha = self.rowAt(y)
+        return linha if linha in self.delegado.cabecalhos and             y - self.rowViewportPosition(linha) < self.delegado.altura_cabecalho else -1
+
+    def mousePressEvent(self, evento):
+        linha = self._no_cabecalho(evento)
+        if linha < 0:
+            return super().mousePressEvent(evento)
+        if evento.button() == Qt.LeftButton:            # clicar no cabeçalho seleciona o álbum inteiro
+            inicio, fim = self._limites_grupo(linha)
+            filtro = self.model()
+            self.selecionar_linhas([filtro.mapToSource(filtro.index(i, 0)).row() for i in range(inicio, fim + 1)])
+
+    def mouseDoubleClickEvent(self, evento):
+        if self._no_cabecalho(evento) < 0:
+            super().mouseDoubleClickEvent(evento)
+
+    def _atualizar_grupos(self):
         """Recalcula onde começa cada álbum (só com mais de um álbum carregado) e a altura dessas linhas."""
         filtro = self.model()
         modelo = filtro.sourceModel()
@@ -573,8 +621,6 @@ class TabelaFaixas(QTableView):
                     cabecalhos[linha] = tags
                 tags.append(dados)
             cabecalhos = {linha: (titulo_cabecalho(t), len(t)) for linha, t in cabecalhos.items()}
-        if cabecalhos == self.delegado.cabecalhos and not forcar:
-            return
         self.delegado.cabecalhos = cabecalhos
         extra = self.delegado.altura_cabecalho
         for linha in range(filtro.rowCount()):
