@@ -395,7 +395,7 @@ class DialogoConfiguracoes(QDialog):
         self.config[chave] = valor
         if chave in ("acento", "usar_escuro", "tema_escuro", "tema_claro"):
             self._atualizar_amostras()
-        self.mudou.emit(deepcopy(self.config))
+        self.mudou.emit(self.previa())
 
     def _ao_mudar_generos(self):
         linhas = [l.strip() for l in self.tx_generos.toPlainText().splitlines()]
@@ -412,7 +412,16 @@ class DialogoConfiguracoes(QDialog):
         chaves_do_usuario = {k: self.config[k] for k in CHAVES_CONFIG}    # restaurar a aparência não apaga a chave colada
         self.config = deepcopy(PADROES) | padroes_do_usuario | chaves_do_usuario
         self._preencher()
-        self.mudou.emit(deepcopy(self.config))
+        self.mudou.emit(self.previa())
+
+    def previa(self):
+        """Config para a prévia ao vivo, com as credenciais ainda como estavam: a chave colada só
+        chega à janela principal no OK (credenciais_aceitas), nunca fica na sessão após um Cancelar."""
+        return deepcopy(self.config) | {k: self.original[k] for k in CHAVES_CONFIG}
+
+    def credenciais_aceitas(self):
+        """{chave: valor} das credenciais como estão no diálogo (para aplicar no OK)."""
+        return {k: self.config[k] for k in CHAVES_CONFIG}
 
     def reject(self):
         self.mudou.emit(deepcopy(self.original))    # volta tudo como estava

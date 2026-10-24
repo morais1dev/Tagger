@@ -654,6 +654,9 @@ class JanelaPrincipal(QMainWindow):
         dialogo.exec()
         self._aplicar_config_pendente()
         if aceito:
+            # as credenciais não passam pela prévia ao vivo: entram só aqui, já indo para o QSettings
+            # (de onde o log as lê para ocultar). No Cancelar a sessão nunca as vê.
+            self.config.update(dialogo.credenciais_aceitas())
             salvar_config(self.settings, self.config)
             self.servicos_mudaram.emit(self.estado_servicos())
 
