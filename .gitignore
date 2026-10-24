@@ -24,3 +24,6 @@ desktop.ini
 
 # Claude Code (configuracoes locais)
 .claude/settings.local.json
+
+# Chaves de API (geradas no build pelos Secrets; nunca commitar)
+tagger/nucleo/chaves.json

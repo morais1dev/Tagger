@@ -42,10 +42,15 @@ if sys.platform == "win32":
         ],
     )
 
+datas = [("tagger/gui/recursos/fontes", "tagger/gui/recursos/fontes")]
+# chaves das APIs (gerado no Actions por scripts/gerar_chaves.py); build local sem ele continua funcionando
+if (RAIZ / "tagger" / "nucleo" / "chaves.json").exists():
+    datas.append(("tagger/nucleo/chaves.json", "tagger/nucleo"))
+
 a = Analysis(
     ["tagger/__main__.py"],
     pathex=[str(RAIZ)],
-    datas=[("tagger/gui/recursos/fontes", "tagger/gui/recursos/fontes")],
+    datas=datas,
     excludes=["tkinter", "customtkinter", "tagger.cli", "pytest"],
     noarchive=False,
 )
