@@ -268,10 +268,18 @@ def carregar(arquivo):
         tags=tags,
         tem_capa=tem_capa,
         duracao=audio.info.length or 0.0,
-        bitrate=(audio.info.bitrate or 0) // 1000,
+        bitrate=_bitrate(audio.info, caminho),
         mtime=mtime,
         formato=fmt,
     )
+
+
+def _bitrate(info, caminho):
+    """Bitrate em kbps. O Opus só tem `bitrate` no mutagen 1.48+; antes disso estima pelo tamanho do arquivo."""
+    bps = getattr(info, "bitrate", None)
+    if not bps and info.length:
+        bps = caminho.stat().st_size * 8 / info.length
+    return int(bps or 0) // 1000
 
 
 def carregar_varios(arquivos):
