@@ -38,6 +38,14 @@ jobs:
       - name: Testes
         run: python -m pytest -q
 
+      # As chaves embutidas vêm dos Secrets do repositório; sem elas o .exe só desativa o serviço.
+      - name: Gerar chaves.json
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          DISCOGS_KEY: ${{ secrets.DISCOGS_KEY }}
+          DISCOGS_SECRET: ${{ secrets.DISCOGS_SECRET }}
+        run: python scripts/gerar_chaves.py
+
       - name: Gerar o executável
         run: pyinstaller tagger.spec --noconfirm
 
