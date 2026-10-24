@@ -14,6 +14,7 @@ PADROES = {
     "subpastas": True,
     "reabrir_ultima": False,
     "numerar_com_total": True,
+    "agrupar_por_album": False,  # desligado: a lista continua na ordem de carga, como sempre foi
     # tags
     "versao_id3": 3,             # só MP3 (FLAC/Ogg/M4A não usam ID3)
     "multivalor": True,          # "A; B" vira vários valores ao salvar (artista, gênero...), em todos os formatos

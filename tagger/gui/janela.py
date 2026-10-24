@@ -285,6 +285,7 @@ class JanelaPrincipal(QMainWindow):
 
         self.tela_vazia.definir_recentes(self._recentes())
         self.tela_vazia.definir_subpastas(self.config["subpastas"])
+        self.tabela.definir_agrupar(self.config["agrupar_por_album"])
         self.aplicar_tema()
         self._atualizar_generos()
         self._atualizar_estado()
@@ -631,6 +632,7 @@ class JanelaPrincipal(QMainWindow):
         if anterior.get("generos") != self.config.get("generos"):
             self._atualizar_generos()
         self.tela_vazia.definir_subpastas(self.config["subpastas"])
+        self.tabela.definir_agrupar(self.config["agrupar_por_album"])
 
     def _aplicar_config_metadata(self):
         """Opções de gravação ficam no módulo metadata (a CLI usa os padrões de lá)."""
