@@ -13,7 +13,7 @@ from PySide6.QtCore import QEvent, QObject, QSettings, QThread, QTimer, QUrl, Qt
 from PySide6.QtGui import QAction, QDesktopServices, QFont, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu,
-    QMessageBox, QProgressBar, QPushButton, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
+    QMessageBox, QProgressBar, QPushButton, QScrollArea, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from tagger.nucleo import metadata
@@ -22,7 +22,9 @@ from tagger.nucleo.metadata import (
     CAMPOS, analisar_extras, carregar, carregar_varios, curingas_audio, foi_modificado, formato, limpar_extras,
     listar_audios, mtime_atual, nomes_formatos, rotulo, validar_valor,
 )
-from tagger.nucleo.organizar import executar_movimentos, executar_organizacao, remover_pastas_vazias
+from tagger.nucleo.organizar import (
+    executar_movimentos, executar_organizacao, pasta_apos_mover, remover_pastas_vazias,
+)
 from tagger.nucleo.padroes import ItemRenomear, executar_renomeacao
 from tagger import __version__
 from tagger.gui import tema
@@ -33,7 +35,7 @@ from tagger.gui.editor import PainelEditor, garantir_jpeg_ou_png
 from tagger.gui.erros import configurar_log, instalar_tratamento_de_erros
 from tagger.gui.icones import icone, icone_app, pixmap
 from tagger.gui.limpeza import DialogoLimpeza
-from tagger.gui.organizar import DialogoOrganizar
+from tagger.gui.organizar import DialogoOrganizar, DialogoResumoOrganizar
 from tagger.gui.padrao import DialogoRenomear, DialogoTagsDoNome, lembrar_padrao
 from tagger.nucleo.rascunho import Rascunho, Renomeacao, executar_salvamento, migrar_historico
 from tagger.gui.rotulo import Migalha, RotuloElidido
@@ -246,13 +248,14 @@ class JanelaPrincipal(QMainWindow):
         self._limpador = None
         self._movedor = None
         self._mtimes_antes, self._itens_movendo, self._pilha_movendo, self._desfazendo = {}, [], None, None
+        self._pastas_do_movimento = ()   # (pasta aberta antes de organizar, destino): a migalha segue ao desfazer
         self._pastas_criadas = set()     # pastas de destino que o Tagger criou (para limpar ao desfazer)
         self._modo_carregar = "substituir"   # "substituir" | "adicionar" | "recarregar"
         self._config_pendente = None
         self.filtro_janelas = None       # FiltroJanelas, instalado pelo main()
 
         self.setWindowTitle("Tagger")
-        self.setMinimumSize(960, 600)
+        self.setMinimumSize(600, 320)
         self.setAcceptDrops(True)
 
         self.modelo = ModeloFaixas(self.rascunho, self)
@@ -272,7 +275,13 @@ class JanelaPrincipal(QMainWindow):
         self.tela_vazia.escolherArquivos.connect(self.adicionar_arquivos)
         self.tela_vazia.abrirRecente.connect(lambda p: self.carregar_caminhos([p], substituir=True))
         self.tela_vazia.removerRecente.connect(self._esquecer_recente)
-        self.telas.addWidget(self.tela_vazia)
+        rolagem = QScrollArea()           # em janelas baixas a tela vazia rola em vez de impor altura mínima
+        rolagem.setWidgetResizable(True)
+        rolagem.setFrameShape(QFrame.NoFrame)
+        rolagem.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        rolagem.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; }")
+        rolagem.setWidget(self.tela_vazia)
+        self.telas.addWidget(rolagem)
         self.telas.addWidget(self._criar_tela_principal())
         layout.addWidget(self.telas, 1)
         self.setCentralWidget(raiz)
@@ -340,7 +349,8 @@ class JanelaPrincipal(QMainWindow):
         self.logo = QLabel(objectName="logo", alignment=Qt.AlignCenter)
         self.logo.setFixedSize(26, 26)
         h.addWidget(self.logo)
-        h.addWidget(QLabel("Tagger", objectName="nomeApp"))
+        self.lbl_nome_app = QLabel("Tagger", objectName="nomeApp")
+        h.addWidget(self.lbl_nome_app)
         h.addSpacing(12)
 
         self.btn_abrir = QPushButton("Abrir pasta")
@@ -417,7 +427,9 @@ class JanelaPrincipal(QMainWindow):
                 botao.setMaximumSize(16777215, 16777215)
             botao.setProperty("tipo", "fantasma" if compacta else None)
             tema.repolir(botao)
-        self.busca.setMinimumWidth(140 if compacta else 220)
+        self.busca.setMinimumWidth(60 if compacta else 220)
+        self.lbl_nome_app.setVisible(not compacta)
+        self._fixar_largura_salvar()
 
     def resizeEvent(self, evento):
         super().resizeEvent(evento)
@@ -429,7 +441,7 @@ class JanelaPrincipal(QMainWindow):
         self.painel.salvarPedido.connect(lambda: self.salvar())
         self.painel.descartarPedido.connect(self.descartar)
         self.painel.aviso.connect(lambda texto: self.avisar(texto))
-        self.painel.setMinimumWidth(330)
+        self.painel.setMinimumWidth(240)
         self.painel.setMaximumWidth(560)
 
         direita = QWidget()
@@ -596,11 +608,12 @@ class JanelaPrincipal(QMainWindow):
         """Largura mínima de "Salvar · 999": a barra não pula toda vez que o número muda."""
         botao = self.btn_salvar_topo
         texto = botao.text()
-        botao.setText("Salvar · 999")
         botao.setMinimumWidth(0)
-        botao.ensurePolished()
-        botao.setMinimumWidth(botao.sizeHint().width())
-        botao.setText(texto)
+        if not getattr(self, "_estado_barra", (False,))[0]:       # na barra compacta o botão pode encolher
+            botao.setText("Salvar · 999")
+            botao.ensurePolished()
+            botao.setMinimumWidth(botao.sizeHint().width())
+            botao.setText(texto)
 
     def changeEvent(self, evento):
         super().changeEvent(evento)
@@ -1033,6 +1046,7 @@ class JanelaPrincipal(QMainWindow):
             feitos, falhas = resultado
             self._pastas_criadas.update(criadas)
             self._aplicar_renomeacao(dict(feitos), self._mtimes_antes)
+            self._seguir_arquivos_movidos(*self._pastas_do_movimento)
             if feitos:
                 pilha_oposta.append(Renomeacao(feitos))
             if falhas:        # o que não voltou continua no histórico para tentar de novo
@@ -1072,6 +1086,7 @@ class JanelaPrincipal(QMainWindow):
             feitos = [(i.origem, i.destino) for i in self._itens_movendo
                       if not i.origem.exists() and i.destino.exists()]
             self._aplicar_renomeacao(dict(feitos), self._mtimes_antes)
+            self._seguir_arquivos_movidos(*self._pastas_do_movimento)
             if feitos and self._pilha_movendo is not None:
                 self._pilha_movendo.append(Renomeacao(feitos))
             if self._desfazendo is None:
@@ -1229,6 +1244,7 @@ class JanelaPrincipal(QMainWindow):
             return
         self._lembrar_padrao("organizar", dialogo.padrao)
         plano, remover, raiz, criadas = dialogo.plano, dialogo.remover_vazias, self.pasta_atual, []
+        self._pastas_do_movimento = (raiz, plano.pasta)       # onde as faixas estavam e para onde vão (desfazer/refazer)
 
         def concluir(resultado):
             feitos, falhas, removidas = resultado
@@ -1245,9 +1261,19 @@ class JanelaPrincipal(QMainWindow):
                 self.avisar(f"{len(feitos)} movido(s), {len(falhas)} falharam (em uso?): {nomes}{extra}", erro=True)
             else:
                 self.avisar(f"{len(feitos)} arquivo(s) movido(s){extra} — Ctrl+Z desfaz", ok=True)
+            self._seguir_arquivos_movidos(plano.pasta)
+            if feitos or falhas:
+                DialogoResumoOrganizar(feitos, falhas, plano.pasta, self).exec()
 
         self._mover_em_segundo_plano(lambda: executar_organizacao(plano, remover, raiz, criadas), concluir,
                                      f"Movendo {len(plano.validos())} arquivos…", plano.validos(), self.pilha_desfazer)
+
+    def _seguir_arquivos_movidos(self, *preferidas):
+        """Migalha (e F5) acompanham os arquivos quando saem da pasta aberta (ver nucleo.pasta_apos_mover)."""
+        nova = pasta_apos_mover(self.pasta_atual, [f.caminho for f in self.modelo.faixas], preferidas)
+        if nova != self.pasta_atual:
+            self.pasta_atual = nova
+            self._atualizar_migalha()
 
     def buscar_tags_online(self):
         selecionadas = self._faixas_selecionadas()

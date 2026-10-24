@@ -4,7 +4,7 @@ import pytest
 
 from tagger.nucleo.organizar import (
     caminho_relativo, executar_movimentos, executar_organizacao, partes_do_padrao, planejar_organizacao,
-    remover_pastas_vazias,
+    pasta_apos_mover, pasta_comum, pastas_de_destino, remover_pastas_vazias, resumo_falhas, resumo_movimentos,
 )
 from tagger.nucleo.padroes import ItemRenomear
 
@@ -213,3 +213,52 @@ def test_pasta_aberta_nunca_e_removida(fabrica_mp3, tmp_path):
     _, falhas, removidas = executar_organizacao(plano, remover_vazias=True, raiz_origem=tmp_path / "aberta")
     assert not falhas, falhas
     assert removidas == [] and (tmp_path / "aberta").exists()
+
+
+def test_resumo_movimentos_relativo_a_base(tmp_path):
+    feitos = [(tmp_path / "b.mp3", tmp_path / "Z" / "Álbum" / "b.mp3"),
+              (tmp_path / "a.mp3", tmp_path / "A" / "Álbum" / "a.mp3"),
+              (tmp_path / "c.mp3", Path("elsewhere") / "c.mp3")]
+    assert resumo_movimentos(feitos, tmp_path) == [
+        ("a.mp3", str(Path("A") / "Álbum" / "a.mp3")),
+        ("c.mp3", str(Path("elsewhere") / "c.mp3")),
+        ("b.mp3", str(Path("Z") / "Álbum" / "b.mp3"))]
+
+
+def test_pastas_de_destino_sem_repetir(tmp_path):
+    feitos = [(tmp_path / "a.mp3", tmp_path / "X" / "a.mp3"), (tmp_path / "b.mp3", tmp_path / "X" / "b.mp3"),
+              (tmp_path / "c.mp3", tmp_path / "Y" / "c.mp3")]
+    assert pastas_de_destino(feitos) == [tmp_path / "X", tmp_path / "Y"]
+
+
+def test_pasta_comum(tmp_path):
+    assert pasta_comum([tmp_path / "A" / "1.mp3", tmp_path / "B" / "2.mp3"]) == tmp_path
+    assert pasta_comum([tmp_path / "A" / "1.mp3"]) == tmp_path / "A"
+    assert pasta_comum([]) is None
+
+
+def test_pasta_apos_mover_parcial_mantem_a_pasta(tmp_path):
+    caminhos = [tmp_path / "ficou.mp3", tmp_path / "Novo" / "foi.mp3"]
+    assert pasta_apos_mover(tmp_path, caminhos, [tmp_path / "Novo"]) == tmp_path
+
+
+def test_pasta_apos_mover_todos_saem(tmp_path):
+    aberta, destino = tmp_path / "aberta", tmp_path / "destino"
+    caminhos = [destino / "A" / "1.mp3", destino / "B" / "2.mp3"]
+    assert pasta_apos_mover(aberta, caminhos, [destino]) == destino          # destino contém a pasta comum
+    assert pasta_apos_mover(aberta, caminhos) == destino                      # sem preferida: a pasta comum
+    assert pasta_apos_mover(aberta, [destino / "A" / "1.mp3"], [destino]) == destino
+    assert pasta_apos_mover(aberta, [destino / "A" / "1.mp3"], [tmp_path / "outra"]) == destino / "A"
+
+
+def test_pasta_apos_mover_desfazer_volta_para_a_pasta_antiga(tmp_path):
+    aberta, destino = tmp_path / "aberta", tmp_path / "destino"
+    assert pasta_apos_mover(destino, [aberta / "1.mp3", aberta / "2.mp3"], [aberta, destino]) == aberta
+
+
+def test_pasta_apos_mover_sem_pasta_aberta(tmp_path):
+    assert pasta_apos_mover(None, [tmp_path / "a.mp3"]) is None
+
+
+def test_resumo_falhas(tmp_path):
+    assert resumo_falhas({tmp_path / "a.mp3": "em uso"}, tmp_path) == [("a.mp3", "Não movido: em uso")]
