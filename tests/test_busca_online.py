@@ -64,10 +64,10 @@ def dialogo(fontes, faixas=None, **kw):
 
 
 def test_servico_sem_credencial_fica_desabilitado_com_dica(app):
-    from tagger.gui.busca_online import SEM_CHAVE
+    from tagger.nucleo.credenciais import DICAS
     dlg = dialogo({})
     assert not dlg.botoes_fonte["discogs"].isEnabled() and not dlg.botoes_fonte["lastfm"].isEnabled()
-    assert dlg.botoes_fonte["lastfm"].toolTip() == SEM_CHAVE["lastfm"]
+    assert dlg.botoes_fonte["lastfm"].toolTip() == DICAS["lastfm"]
     assert not dlg.ck_alternativa.isEnabled()
     dlg.reject()
 

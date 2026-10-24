@@ -216,7 +216,7 @@ def test_buscar_releases_discogs_credencial_so_no_cabecalho():
 def test_sem_credencial_discogs_nao_faz_requisicao():
     c, rede, _, _ = cliente_discogs({}, authorization=None)
     assert not c.disponivel
-    with pytest.raises(ErroBusca, match="desativada"):
+    with pytest.raises(ErroBusca, match="indisponível"):
         c.buscar_releases("a", "b")
     assert rede.pedidos == []
 
@@ -404,7 +404,7 @@ def test_lastfm_erros_sem_chave_na_mensagem(resposta, trecho):
 
 def test_lastfm_sem_chave_desativado():
     c, rede, _ = cliente_lastfm({}, api_key="  ")
-    with pytest.raises(ErroBusca, match="desativada"):
+    with pytest.raises(ErroBusca, match="indisponível"):
         c.top_albuns("Banda")
     assert rede.pedidos == []
 

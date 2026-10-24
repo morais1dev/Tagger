@@ -25,7 +25,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
-from tagger.nucleo import busca, online
+from tagger.nucleo import busca, credenciais, online
 from tagger.nucleo.busca import ErroBusca, FaixaRelease, NAO_ENCONTRADO, USER_AGENT
 
 URL_API = "https://ws.audioscrobbler.com/2.0/"
@@ -37,7 +37,7 @@ BACKOFF = 2.0
 TIMEOUT = busca.TIMEOUT
 LIMITE_RESPOSTA = 5 * online.MB
 TETO_CACHE = 100 * online.MB
-SEM_CREDENCIAL = "Busca no Last.fm desativada: configure uma chave nas Configurações."
+SEM_CREDENCIAL = credenciais.DICAS["lastfm"]
 DOMINIOS = ("last.fm",)           # links do JSON só são aceitos nesses hosts (a GUI vai abri-los)
 ERRO_LIMITE = 29          # "Rate limit exceeded"
 ERROS_CHAVE = {10, 26}    # chave inválida / suspensa
