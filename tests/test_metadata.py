@@ -2,6 +2,7 @@ import base64
 import os
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import mutagen
 import pytest
@@ -645,3 +646,25 @@ def test_gravadora_vorbis_organization_tem_prioridade(criar_audio):
     audio.tags["LABEL"] = ["Outro"]
     audio.save()
     assert carregar(caminho).tags["gravadora"] == "Principal"
+
+
+# ----------------------------------------------------------------- bitrate
+def test_bitrate_usa_o_do_mutagen(tmp_path):
+    arquivo = tmp_path / "a.opus"
+    arquivo.write_bytes(b"x" * 100)
+    assert metadata._bitrate(SimpleNamespace(length=2, bitrate=128000), arquivo) == 128
+
+
+@pytest.mark.parametrize("info", [SimpleNamespace(length=2, bitrate=None), SimpleNamespace(length=2, bitrate=0),
+                                  SimpleNamespace(length=2)])      # sem o atributo: mutagen < 1.48 no Opus
+def test_bitrate_estimado_pelo_tamanho(tmp_path, info):
+    arquivo = tmp_path / "a.opus"
+    arquivo.write_bytes(b"x" * 32000)              # 32000 bytes em 2 s = 128 kbps
+    assert metadata._bitrate(info, arquivo) == 128
+
+
+@pytest.mark.parametrize("duracao", [0, None])
+def test_bitrate_sem_duracao_e_zero(tmp_path, duracao):
+    arquivo = tmp_path / "a.opus"
+    arquivo.write_bytes(b"x" * 1000)
+    assert metadata._bitrate(SimpleNamespace(length=duracao), arquivo) == 0
