@@ -229,17 +229,16 @@ class DialogoBuscaOnline(QDialog):
         self._conhecidas = credenciais.credenciais_da_config(config)      # ocultadas em toda mensagem de erro
         self._fontes = dict(fontes if fontes is not None else criar_fontes(config, pasta_cache_lastfm()))
         self._dicas_sem_chave = dict(SEM_CHAVE)
-        for nome, estado in (estados or {}).items():
-            if nome in self._fontes and not estado.disponivel:
-                self._fontes[nome] = None
-                self._dicas_sem_chave[nome] = estado.dica or SEM_CHAVE[nome]
+        self._aplicar_estados(estados)
         self._fechado = False
         self._resultado = None
         self._trabalho = None
         self._fonte_resultados = None          # fonte dos itens na lista (pode ser o Discogs como alternativa)
-        self._detalhes = {}                    # id(candidato) -> (release, alteracoes, casadas, sem_par)
+        # id(candidato) -> (candidato, release, alteracoes, casadas, sem_par). O id só vale enquanto o objeto
+        # vive (o CPython reaproveita): por isso a entrada guarda o candidato, conferido com `is` em _detalhe,
+        # e o dicionário é limpo a cada busca nova e troca de fonte.
+        self._detalhes = {}
         self.setWindowTitle("Buscar tags online")
-        self.setMinimumSize(420, 360)
         self.resize(720, 600)
 
         # fonte: um botão por serviço, desabilitado com dica quando falta credencial
@@ -249,19 +248,13 @@ class DialogoBuscaOnline(QDialog):
         linha_fonte.addWidget(QLabel("Fonte"))
         for nome in (MUSICBRAINZ, DISCOGS, LASTFM):
             botao = QRadioButton(NOMES[nome])
-            disponivel = self._fontes.get(nome) is not None
-            botao.setEnabled(disponivel)
-            botao.setToolTip(DICAS[nome] if disponivel else self._dicas_sem_chave[nome])
             self.grupo_fonte.addButton(botao)
             self.botoes_fonte[nome] = botao
             botao.toggled.connect(lambda ligado, n=nome: ligado and self._ao_trocar_fonte(n))
             linha_fonte.addWidget(botao)
         linha_fonte.addStretch()
         self.ck_alternativa = QCheckBox("Se o MusicBrainz não achar, buscar no Discogs")
-        self.ck_alternativa.setEnabled(self._fontes.get(DISCOGS) is not None)
-        self.ck_alternativa.setChecked(self.ck_alternativa.isEnabled())
-        if not self.ck_alternativa.isEnabled():
-            self.ck_alternativa.setToolTip(self._dicas_sem_chave[DISCOGS])
+        self.ck_alternativa.setChecked(self._fontes.get(DISCOGS) is not None)
 
         valor_de = lambda campo: gui_busca._primeiro_valor(self.faixas, campo, self._valor)
         self.ed_artista = QLineEdit(valor_de("albumartist") or valor_de("artist"))
@@ -272,15 +265,18 @@ class DialogoBuscaOnline(QDialog):
         form = QFormLayout()
         form.addRow("Artista", self.ed_artista)
         form.addRow("Álbum", self.ed_album)
-        form.addRow("Título (se não houver álbum)", self.ed_titulo)
+        self.ed_titulo.setPlaceholderText("só se não houver álbum")
+        form.addRow("Título", self.ed_titulo)
 
         self.btn_buscar = QPushButton("Buscar")
         self.btn_buscar.clicked.connect(self.buscar)
 
         self.lista = QListWidget()
+        self.lista.setMinimumHeight(56)       # o divisor pode encolher as duas partes em janelas baixas
         self.lista.itemSelectionChanged.connect(self._ao_selecionar)
         self.lista.itemDoubleClicked.connect(lambda _item: self.aplicar())
         self.previa = QTableWidget(0, 4)
+        self.previa.setMinimumHeight(56)
         self.previa.setHorizontalHeaderLabels(["Arquivo", "Campo", "Antes", "Depois"])
         self.previa.verticalHeader().setVisible(False)
         self.previa.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -293,6 +289,7 @@ class DialogoBuscaOnline(QDialog):
         vp = QVBoxLayout(caixa_previa)
         vp.setContentsMargins(0, 0, 0, 0)
         self.lbl_previa = gui_busca._rotulo("Prévia: escolha um resultado.", "ajuda")
+        self.lbl_previa.setTextFormat(Qt.PlainText)          # nomes vindos do serviço não viram HTML
         vp.addWidget(self.lbl_previa)
         vp.addWidget(self.previa, 1)
         divisor.addWidget(caixa_previa)
@@ -307,12 +304,19 @@ class DialogoBuscaOnline(QDialog):
         self.atribuicao.setOpenExternalLinks(True)
         self.atribuicao.setTextInteractionFlags(Qt.TextBrowserInteraction)
         self.estado = gui_busca._rotulo("", "ajuda")
+        self.estado.setTextFormat(Qt.PlainText)
 
-        self.ck_capa = QCheckBox("Baixar a capa também (Cover Art Archive)")
+        self.ck_capa = QCheckBox("Baixar a capa")
+        self.ck_capa.setToolTip("Capa do Cover Art Archive (só com o MusicBrainz)")
         self.ck_capa.setChecked(True)
-        btn_sobre = QPushButton("Sobre")
-        btn_sobre.setProperty("tipo", "fantasma")
-        btn_sobre.clicked.connect(self._sobre)
+        self.lnk_sobre = QLabel('<a href="#sobre">Sobre</a>')
+        self.lnk_sobre.setProperty("papel", "ajuda")
+        self.lnk_sobre.setTextFormat(Qt.RichText)
+        self.lnk_sobre.setToolTip("Sobre o Tagger e os serviços online (F1)")
+        self.lnk_sobre.linkActivated.connect(lambda _link: self._sobre())
+        linha_atribuicao = QHBoxLayout()
+        linha_atribuicao.addWidget(self.atribuicao, 1)
+        linha_atribuicao.addWidget(self.lnk_sobre, 0, Qt.AlignTop)
         btn_cancelar = QPushButton("Cancelar")
         btn_cancelar.clicked.connect(self.reject)
         self.btn_aplicar = QPushButton("Aplicar ao rascunho")
@@ -321,7 +325,6 @@ class DialogoBuscaOnline(QDialog):
         rodape = QHBoxLayout()
         rodape.addWidget(self.ck_capa)
         rodape.addStretch()
-        rodape.addWidget(btn_sobre)
         rodape.addWidget(btn_cancelar)
         rodape.addWidget(self.btn_aplicar)
 
@@ -333,15 +336,51 @@ class DialogoBuscaOnline(QDialog):
         v.addLayout(form)
         v.addWidget(self.btn_buscar, alignment=Qt.AlignRight)
         v.addWidget(divisor, 1)
-        v.addWidget(self.atribuicao)
+        v.addLayout(linha_atribuicao)
         v.addWidget(self.estado)
         v.addLayout(rodape)
 
         self._cores = cores_do_tema(parent)
         aplicar_cores(self._cores, self.lista)
+        self.lnk_sobre.setText(colorir_links(self.lnk_sobre.text(), self._cores))
+        self._atualizar_dicas()
         inicial = fonte_inicial if self._fontes.get(fonte_inicial) else MUSICBRAINZ
         self.botoes_fonte[inicial].setChecked(True)
         self._ao_trocar_fonte(inicial)
+
+    # ------------------------------------------------------------ serviços
+    def _aplicar_estados(self, estados, config=None):
+        """Serviço indisponível fica sem fonte (botão desabilitado com a dica); o que voltou a ficar
+        disponível ganha a fonte de novo, criada com a `config` atual."""
+        novas = None
+        for nome, estado in (estados or {}).items():
+            if nome not in SEM_CHAVE:
+                continue
+            if not estado.disponivel:
+                self._fontes[nome] = None
+                self._dicas_sem_chave[nome] = estado.dica or SEM_CHAVE[nome]
+            elif self._fontes.get(nome) is None and config is not None:
+                novas = novas or criar_fontes(config, pasta_cache_lastfm())
+                self._fontes[nome] = novas[nome]
+
+    def atualizar_servicos(self, estados, config):
+        """Ligado ao sinal JanelaPrincipal.servicos_mudaram enquanto a janela está aberta."""
+        self._conhecidas = tuple(dict.fromkeys(self._conhecidas + credenciais.credenciais_da_config(config)))
+        self._aplicar_estados(estados, config)
+        self._atualizar_dicas()
+        if self._fontes.get(self.fonte) is None:
+            self.botoes_fonte[MUSICBRAINZ].setChecked(True)
+        self._atualizar()
+
+    def _atualizar_dicas(self):
+        for nome, botao in self.botoes_fonte.items():
+            disponivel = self._fontes.get(nome) is not None
+            botao.setToolTip(DICAS[nome] if disponivel else self._dicas_sem_chave[nome])
+        tem_discogs = self._fontes.get(DISCOGS) is not None
+        self.ck_alternativa.setEnabled(tem_discogs)
+        if not tem_discogs:
+            self.ck_alternativa.setChecked(False)
+        self.ck_alternativa.setToolTip("" if tem_discogs else self._dicas_sem_chave[DISCOGS])
 
     # ------------------------------------------------------------ estado
     @property
@@ -357,9 +396,8 @@ class DialogoBuscaOnline(QDialog):
         self.btn_buscar.setEnabled(livre)
         for nome, botao in self.botoes_fonte.items():
             botao.setEnabled(livre and self._fontes.get(nome) is not None)
-        candidato = self._candidato()
-        self.btn_aplicar.setEnabled(livre and candidato is not None and id(candidato) in self._detalhes
-                                    and bool(self._detalhes[id(candidato)][2]))
+        detalhe = self._detalhe(self._candidato())
+        self.btn_aplicar.setEnabled(livre and detalhe is not None and bool(detalhe[2]))
         fonte = self._fontes.get(self._fonte_resultados or self.fonte)
         self.ck_capa.setVisible(bool(fonte and fonte.tem_capa))
         self.ck_alternativa.setVisible(self.fonte == MUSICBRAINZ)
@@ -380,13 +418,14 @@ class DialogoBuscaOnline(QDialog):
             return
         self._atualizar()
         candidato = self._candidato()
-        if candidato is not None and id(candidato) not in self._detalhes:
+        if candidato is not None and self._detalhe(candidato) is None:
             self._ao_selecionar()            # a seleção mudou enquanto outra consulta rodava
 
     def _ao_trocar_fonte(self, nome):
         if self._ocupado():
             return
         self.lista.clear()
+        self._detalhes.clear()
         self._limpar_previa("Prévia: escolha um resultado.")
         self._fonte_resultados = None
         self._definir_atribuicao(self._atribuicao_da_fonte(nome))
@@ -429,6 +468,7 @@ class DialogoBuscaOnline(QDialog):
         if self._fechado:
             return
         self.lista.clear()
+        self._detalhes.clear()
         self._limpar_previa("Prévia: escolha um resultado.")
         if erro:
             self._mensagem(erro)
@@ -458,12 +498,22 @@ class DialogoBuscaOnline(QDialog):
         itens = self.lista.selectedItems()
         return itens[0].data(Qt.UserRole) if itens else None
 
+    def _detalhe(self, candidato):
+        """(release, alteracoes, casadas, sem_par) já baixados para ESTE candidato, ou None."""
+        guardado = self._detalhes.get(id(candidato)) if candidato is not None else None
+        if guardado is None or guardado[0] is not candidato:
+            return None
+        return guardado[1:]
+
+    def _na_lista(self, candidato):
+        return any(self.lista.item(i).data(Qt.UserRole) is candidato for i in range(self.lista.count()))
+
     def _ao_selecionar(self):
         candidato = self._candidato()
         self._atualizar()
         if candidato is None:
             return
-        if id(candidato) in self._detalhes:
+        if self._detalhe(candidato) is not None:
             self._mostrar_previa(candidato)
             return
         if self._ocupado():
@@ -486,7 +536,9 @@ class DialogoBuscaOnline(QDialog):
             self._mensagem(erro)
             return
         candidato, release, (alteracoes, casadas, sem_par) = dados
-        self._detalhes[id(candidato)] = (release, alteracoes, casadas, sem_par)
+        if not self._na_lista(candidato):
+            return                            # resposta de uma busca anterior: descarta
+        self._detalhes[id(candidato)] = (candidato, release, alteracoes, casadas, sem_par)
         if candidato is self._candidato():
             self._mostrar_previa(candidato)
 
@@ -495,7 +547,7 @@ class DialogoBuscaOnline(QDialog):
         self.lbl_previa.setText(texto)
 
     def _mostrar_previa(self, candidato):
-        release, alteracoes, casadas, sem_par = self._detalhes[id(candidato)]
+        release, alteracoes, casadas, sem_par = self._detalhe(candidato)
         fonte = self._fontes[self._fonte_resultados]
         self._definir_atribuicao(fonte.atribuicao(release))
         linhas = linhas_da_previa(alteracoes, self._valor)
@@ -520,9 +572,10 @@ class DialogoBuscaOnline(QDialog):
     # ------------------------------------------------------------ aplicar
     def aplicar(self):
         candidato = self._candidato()
-        if self._ocupado() or candidato is None or id(candidato) not in self._detalhes:
+        detalhe = self._detalhe(candidato)
+        if self._ocupado() or detalhe is None:
             return
-        _release, alteracoes, casadas, sem_par = self._detalhes[id(candidato)]
+        _release, alteracoes, casadas, sem_par = detalhe
         if not casadas:
             return
         fonte = self._fontes[self._fonte_resultados]
@@ -557,7 +610,9 @@ class DialogoBuscaOnline(QDialog):
         self._fechado = True
         trabalho = self._trabalho
         if trabalho is not None and trabalho.isRunning():
-            # não espera (travaria a janela): solta a thread, que termina sozinha
+            # não espera (travaria a janela): solta a thread, que termina sozinha. Não há como cancelar
+            # uma requisição do urllib em andamento: ela vai até o fim (no máximo o TIMEOUT de cada
+            # tentativa) e o resultado é descartado. Aceito: só custa a requisição.
             trabalho.concluido.disconnect()
             trabalho.finished.disconnect()
             trabalho.setParent(None)

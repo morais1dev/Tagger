@@ -167,3 +167,61 @@ def test_criar_fontes_sem_credencial(monkeypatch, tmp_path):
     fontes = busca_online.criar_fontes({"lastfm_api_key": "", "discogs_token": "tok"}, tmp_path)
     assert fontes["lastfm"] is None and fontes["discogs"] is not None
     assert isinstance(fontes["musicbrainz"].cliente, busca.ClienteMusicBrainz)
+
+
+class FonteContada:
+    """Cada busca devolve um candidato NOVO; o detalhe diz de qual busca ele veio."""
+    nome, tem_capa = "discogs", False
+
+    def __init__(self):
+        self.buscas = 0
+
+    def buscar(self, *termos):
+        self.buscas += 1
+        return [(f"Resultado {self.buscas}", SimpleNamespace(n=self.buscas))]
+
+    def detalhar(self, candidato):
+        return SimpleNamespace(n=candidato.n)
+
+    def analisar(self, faixas, release, valor):
+        return [(faixas[0], {"album": f"Album {release.n}"})], list(faixas), []
+
+    def atribuicao(self, release):
+        return ""
+
+
+def test_duas_buscas_seguidas_nao_reaproveitam_a_previa(app):
+    fonte = FonteContada()
+    dlg = dialogo({"discogs": fonte}, fonte_inicial="discogs")
+    for n in (1, 2):
+        dlg.buscar()
+        esperar(app, lambda: dlg.lista.count() == 1 and dlg.lista.item(0).text() == f"Resultado {n}"
+                and dlg.previa.rowCount() == 1 and not dlg._ocupado())
+        assert dlg.previa.item(0, 3).text() == f"Album {n}"
+    dlg.aplicar()
+    assert dlg.resultado().alteracoes[0][1] == {"album": "Album 2"}
+
+
+def test_detalhe_guardado_de_outro_objeto_com_o_mesmo_id_e_ignorado(app):
+    dlg = dialogo({"discogs": FonteContada()}, fonte_inicial="discogs")
+    novo, antigo = SimpleNamespace(), SimpleNamespace()
+    dlg._detalhes[id(novo)] = (antigo, "release velho", [], [], [])     # como se o id tivesse sido reaproveitado
+    assert dlg._detalhe(novo) is None
+    dlg._detalhes[id(novo)] = (novo, "release", [], [], [])
+    assert dlg._detalhe(novo) == ("release", [], [], [])
+    dlg.reject()
+
+
+def test_servicos_mudaram_com_a_janela_aberta(app, monkeypatch):
+    from tagger.gui import busca_online
+    dlg = dialogo({"discogs": FonteContada()}, fonte_inicial="discogs")
+    dlg.atualizar_servicos({"discogs": SimpleNamespace(disponivel=False, dica="Sem token agora")}, {})
+    assert not dlg.botoes_fonte["discogs"].isEnabled() and dlg.fonte == "musicbrainz"
+    assert dlg.botoes_fonte["discogs"].toolTip() == "Sem token agora" and not dlg.ck_alternativa.isEnabled()
+    monkeypatch.setattr(busca_online, "criar_fontes", lambda config, pasta: {"discogs": FonteContada(),
+                                                                             "lastfm": None, "musicbrainz": None})
+    dlg.atualizar_servicos({"discogs": SimpleNamespace(disponivel=True, dica=None)},
+                           {"discogs_token": "tokenNovo0123456789abcdef"})
+    assert dlg.botoes_fonte["discogs"].isEnabled() and dlg.ck_alternativa.isEnabled()
+    assert "tokenNovo0123456789abcdef" in dlg._conhecidas
+    dlg.reject()

@@ -1293,7 +1293,13 @@ class JanelaPrincipal(QMainWindow):
             return
         dialogo = DialogoBuscaOnline(selecionadas, self, valor=self.rascunho.valor, config=self.config,
                                      estados=self.estado_servicos())
-        if dialogo.exec() != QDialog.Accepted:
+        ao_mudar = lambda estados: dialogo.atualizar_servicos(estados, self.config)
+        self.servicos_mudaram.connect(ao_mudar)
+        try:
+            aceito = dialogo.exec() == QDialog.Accepted
+        finally:
+            self.servicos_mudaram.disconnect(ao_mudar)
+        if not aceito:
             return
         resultado = dialogo.resultado()
         self.rascunho.definir_por_faixa(resultado.alteracoes)

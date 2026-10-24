@@ -87,8 +87,12 @@ class DialogoConfiguracoes(QDialog):
         btn_ok.setDefault(True)
         btn_ok.clicked.connect(self.accept)
 
+        btn_sobre = QPushButton("Sobre o Tagger")
+        btn_sobre.setToolTip("Versão, serviços online e avisos (F1)")
+        btn_sobre.clicked.connect(self._sobre)
         rodape = QHBoxLayout()
         rodape.addWidget(btn_padroes)
+        rodape.addWidget(btn_sobre)
         rodape.addStretch()
         rodape.addWidget(btn_cancelar)
         rodape.addWidget(btn_ok)
@@ -406,6 +410,10 @@ class DialogoConfiguracoes(QDialog):
         cor = QColorDialog.getColor(QColor(inicial), self, "Cor de destaque")
         if cor.isValid():
             self._definir("acento", cor.name())
+
+    def _sobre(self):
+        from tagger.gui.sobre import DialogoSobre
+        DialogoSobre(self).exec()
 
     def _restaurar_padroes(self):
         padroes_do_usuario = {k: v for k, v in self.config.items() if k.startswith(("padrao_", "recentes_"))}   # não aparecem aqui
