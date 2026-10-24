@@ -28,6 +28,7 @@ CHAVES = {
     "lyricist":    "----:com.apple.iTunes:LYRICIST",
     "comment":     "\xa9cmt",
     "lyrics":      "\xa9lyr",
+    "gravadora":   "----:com.apple.iTunes:LABEL",    # o mesmo que o Picard grava
 }
 
 CAMPOS_NUMERICOS = {"tracknumber", "discnumber"}

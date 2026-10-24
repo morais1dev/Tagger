@@ -27,6 +27,7 @@ COLUNAS = [
     ("genre",       "Gênero",           120,  True),
     ("composer",    "Compositor",       150,  False),
     ("lyricist",    "Letrista",         150,  False),
+    ("gravadora",   "Gravadora",        150,  False),
     ("comment",     "Comentário",       200,  False),
     ("lyrics",      "Letra",            200,  False),
     ("duracao",     "Duração",          76,   True),
@@ -41,13 +42,13 @@ TITULOS = {c[0]: c[1] for c in COLUNAS}
 COLUNAS_FIXAS = {"title", "estado"}            # não podem ser escondidas
 COLUNAS_MONO = {"tracknumber", "discnumber", "date", "duracao", "bitrate"}
 COLUNAS_SECUNDARIAS = {"tracknumber", "discnumber", "album", "date", "genre", "duracao", "bitrate", "pasta",
-                       "composer", "lyricist", "comment", "lyrics"}
+                       "composer", "lyricist", "gravadora", "comment", "lyrics"}
 COLUNAS_DIREITA = {"duracao", "bitrate"}
 EDITAVEIS = set(CAMPOS)                        # colunas que são tags podem ser editadas na célula
 CAMPOS_TEXTO_LONGO = {"comment", "lyrics"}     # a célula mostra só a 1ª linha
 LARGURA_MIN_TITULO = 160
 # quando a tabela fica estreita, essas colunas somem sozinhas (na ordem) até o Título caber
-ORDEM_ESCONDER = ["lyrics", "comment", "lyricist", "composer", "pasta", "arquivo", "bitrate", "discnumber",
+ORDEM_ESCONDER = ["lyrics", "comment", "gravadora", "lyricist", "composer", "pasta", "arquivo", "bitrate", "discnumber",
                   "albumartist", "genre", "date", "capa", "duracao", "album", "tracknumber"]
 
 PAPEL_ORDEM = Qt.UserRole          # valor usado para ordenar a coluna

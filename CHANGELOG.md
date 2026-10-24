@@ -5,6 +5,7 @@ All notable changes to Tagger are listed here. Versions follow [Semantic Version
 ## [Unreleased]
 
 ### Added
+- **Label** ("Gravadora") tag for MP3 (`TPUB`), FLAC/Ogg (`ORGANIZATION`, also reads `LABEL`) and M4A (`LABEL` free-form atom, as Picard writes it). It shows in the editor panel and as an optional column, and works with pending changes.
 - **Group by album** (Settings → Behavior, off by default): with more than one album loaded, the list shows a header per album ("Album — Album artist, year", with the track count) and orders the tracks by disc and track. Selection, filter, in-cell editing and the row actions work as before; the header is not a track.
 
 ## [2.1.0] — 2026-10-23

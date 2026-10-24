@@ -17,7 +17,7 @@ Tagger is a desktop app for editing and organizing the metadata of MP3, FLAC, Og
 - Open a folder (optionally with subfolders), add files, or drag & drop them onto the window.
 - Edit one file or many at once: fields that differ show as ‹various values› and only change if you type in them.
 - Edit directly in the table (double-click or F2), with a search filter and configurable, reorderable columns.
-- Fields: title, artist, album, album artist, track, disc, year, genre (with autocomplete), composer, lyricist, comment and **lyrics**.
+- Fields: title, artist, album, album artist, track, disc, year, genre (with autocomplete), composer, lyricist, label, comment and **lyrics**.
 - Number tracks in table order, and copy/paste tags between files.
 - Values are validated as you type (year, track/disc numbers, genre).
 - Formats: MP3 (ID3), FLAC and Ogg Vorbis (Vorbis comments), M4A/MP4 (iTunes tags), all with the same fields.
@@ -109,7 +109,7 @@ Right-click the table for all row actions, and right-click the column header to 
 | `%artist% - %title%` (reading) | `Aurora Lane - Afterglow.mp3` → artist, title |
 | `%artist%/%album%/%track% - %title%` (reading) | uses the two parent folders too |
 
-Both `{field}` and `%field%` work in either direction. Fields: `title`, `artist`, `album`, `albumartist`, `tracknumber` (`track`), `discnumber` (`disc`), `date` (`year`), `genre`, `composer`, `lyricist`, `comment`, `lyrics`. `{field:02}` pads numbers with zeros, and `{*}` skips text when reading names. When organizing, `/` separates folders, the file extension is kept, and empty tags become `Unknown Artist` / `Unknown Album` (album artist falls back to artist).
+Both `{field}` and `%field%` work in either direction. Fields: `title`, `artist`, `album`, `albumartist`, `tracknumber` (`track`), `discnumber` (`disc`), `date` (`year`), `genre`, `composer`, `lyricist`, `comment`, `lyrics`, `gravadora` (label). `{field:02}` pads numbers with zeros, and `{*}` skips text when reading names. When organizing, `/` separates folders, the file extension is kept, and empty tags become `Unknown Artist` / `Unknown Album` (album artist falls back to artist).
 
 ## Where things are stored
 

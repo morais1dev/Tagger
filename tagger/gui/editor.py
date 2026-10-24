@@ -24,7 +24,7 @@ from tagger.gui.tema import repolir
 
 CAMPOS_LARGOS_1 = ["title", "artist", "album", "albumartist"]
 CAMPOS_PARES = ["tracknumber", "discnumber", "date", "genre"]
-CAMPOS_LARGOS_2 = ["composer", "lyricist"]
+CAMPOS_LARGOS_2 = ["composer", "lyricist", "gravadora"]
 CAMPOS_MULTILINHA = {"comment": 76, "lyrics": 160}     # campo -> altura
 CAMPOS_MONO = {"tracknumber", "discnumber", "date"}
 
