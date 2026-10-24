@@ -555,18 +555,23 @@ def test_numerar_romanos_nao_viram_lado():
     assert numerar(["A1", "B1", "I1", "J1"]) == [(1, 1), (1, 2), (5, 1), (5, 2)]  # com número: lado
 
 
-def test_gravadora_entra_no_rascunho_quando_o_campo_existir(monkeypatch):
+def test_gravadora_entra_nas_alteracoes(monkeypatch):
     from tagger.nucleo import metadata
     c, _, _, _ = cliente_discogs({"/releases/123": Resposta(VINIL)})
     r = c.detalhar_release(123)
     f = faixa("1.mp3", title="Abertura", album="Disco Raro", albumartist="Banda & Outra", date="1977",
               tracknumber="1/4", discnumber="1/2", artist="Banda & Outra")
-    assert discogs.montar_alteracoes([f], r) == []                  # sem o campo: nada de gravadora
-    monkeypatch.setattr(metadata, "CAMPOS", {**metadata.CAMPOS, "gravadora": ("Gravadora", None)})
+    assert "gravadora" in metadata.CAMPOS
     assert discogs.montar_alteracoes([f], r) == [(f, {"gravadora": "Selo Independente"})]
+    rascunho = Rascunho()
+    rascunho.definir_por_faixa(discogs.montar_alteracoes([f], r, valor=rascunho.valor))
+    assert rascunho.valor(f, "gravadora") == "Selo Independente" and rascunho.validar() == []
     assert discogs.montar_alteracoes([f], r, campos={"title"}) == []
     r.gravadora = ""
     assert discogs.montar_alteracoes([f], r) == []
+    r.gravadora = "Selo Independente"
+    monkeypatch.setattr(metadata, "CAMPOS", {k: v for k, v in metadata.CAMPOS.items() if k != "gravadora"})
+    assert discogs.montar_alteracoes([f], r) == []                  # sem o campo: nada de gravadora
 
 
 def test_cache_em_disco_nao_deixa_temporario(tmp_path):
