@@ -138,16 +138,24 @@ def sem_orfaos():
 
 
 @pytest.fixture(autouse=True)
-def qsettings_isolado(tmp_path_factory):
-    """QSettings("Tagger", "Tagger") dos testes vai para uma pasta temporária (INI), nunca para o
-    registro/arquivo real do usuário. Hoje nenhum teste abre a JanelaPrincipal, mas isto protege os próximos."""
+def qsettings_isolado(tmp_path_factory, monkeypatch):
+    """QSettings("Tagger", "Tagger") (janela.py e erros.py) vira um INI numa pasta temporária.
+
+    QSettings(org, app) sempre usa o formato nativo (o registro no Windows) e ignora setDefaultFormat;
+    por isso o nome QSettings é trocado nesses módulos por uma fábrica que devolve um INI no tmp.
+    Devolve a pasta, para os testes conferirem. Nunca cria chave no registro real.
+    """
     try:
         from PySide6.QtCore import QSettings
+        from tagger.gui import erros, janela
     except ImportError:
-        yield
+        yield None
         return
     pasta = tmp_path_factory.mktemp("qsettings")
-    QSettings.setDefaultFormat(QSettings.IniFormat)
-    QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, str(pasta))
-    yield
-    QSettings.setDefaultFormat(QSettings.NativeFormat)
+
+    def fabrica(*_args, **_kwargs):
+        return QSettings(str(pasta / "Tagger.ini"), QSettings.IniFormat)
+
+    monkeypatch.setattr(erros, "QSettings", fabrica)
+    monkeypatch.setattr(janela, "QSettings", fabrica)
+    yield pasta

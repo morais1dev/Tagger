@@ -100,8 +100,9 @@ def test_musicbrainz_sem_resultado_usa_o_discogs(app):
     assert dlg.fonte == "musicbrainz" and dlg.ck_alternativa.isChecked()
     dlg.buscar()
     esperar(app, lambda: dlg.lista.count() == 1)
+    # só depois do detalhe (prévia pronta) o estado volta a trazer o aviso: antes disso mostra "Baixando dados..."
+    esperar(app, lambda: dlg.btn_aplicar.isEnabled() and "Confira a prévia" in dlg.estado.text())
     assert "Discogs" in dlg.estado.text() and "Data provided by Discogs." in dlg.atribuicao.text()
-    esperar(app, lambda: dlg.btn_aplicar.isEnabled())
     dlg.reject()
 
 
