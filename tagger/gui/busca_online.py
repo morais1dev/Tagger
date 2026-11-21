@@ -14,7 +14,7 @@ com o botão desabilitado e a dica que vem de lá.
 
 Regras: a rede roda fora da thread da GUI; mensagens de erro passam por ocultar_credenciais;
 capa só do Cover Art Archive (só a fonte MusicBrainz oferece capa); atribuição do
-Discogs fica visíveis ao lado dos dados, com links validados por online.url_segura.
+Discogs fica visível ao lado dos dados, com links validados por online.url_segura.
 """
 
 import html

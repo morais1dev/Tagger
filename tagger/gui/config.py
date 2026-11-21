@@ -42,7 +42,13 @@ PADROES = {
 DENSIDADES = {"compacta": "Compacta", "confortavel": "Confortável", "espacosa": "Espaçosa"}
 
 
+# chaves de versões antigas, apagadas do QSettings ao carregar (o Last.fm foi removido)
+CHAVES_ANTIGAS = ("config/lastfm_api_key",)
+
+
 def carregar_config(settings):
+    for chave in CHAVES_ANTIGAS:
+        settings.remove(chave)
     config = {}
     for chave, padrao in PADROES.items():
         valor = settings.value(f"config/{chave}", padrao)
