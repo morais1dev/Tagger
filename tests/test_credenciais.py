@@ -197,8 +197,8 @@ def test_discogs_sem_secret_e_none(pasta):
 # --- ocultar_credenciais -------------------------------------------------------------------------------
 
 def test_oculta_api_key_na_url(pasta):
-    url = "https://ws.audioscrobbler.com/2.0/?method=album.getinfo&api_key=abc123&format=json"
-    assert ocultar_credenciais(url) == ("https://ws.audioscrobbler.com/2.0/?method=album.getinfo"
+    url = "https://api.exemplo.com/2.0/?method=album.getinfo&api_key=abc123&format=json"
+    assert ocultar_credenciais(url) == ("https://api.exemplo.com/2.0/?method=album.getinfo"
                                         "&api_key=***&format=json")
     assert ocultar_credenciais("...?api_key%3Dabc123%26x") == "...?api_key%3D***%26x"
 
