@@ -256,7 +256,6 @@ def test_dialogo_fluxo_completo(monkeypatch):
 
 def test_cancelar_com_thread_rodando_nao_trava_nem_aceita(monkeypatch):
     import threading
-    import time
     pytest.importorskip("PySide6")
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
@@ -273,15 +272,14 @@ def test_cancelar_com_thread_rodando_nao_trava_nem_aceita(monkeypatch):
                            cliente=ClienteMusicBrainz(lenta, Limitador(lambda s: None, lambda: 0.0)))
     dlg.buscar()
     assert chamou.wait(5)
-    inicio = time.monotonic()
-    dlg.reject()                                    # não pode esperar a rede
-    assert time.monotonic() - inicio < 1
+    assert not gui._ORFAOS                          # a fixture sem_orfaos garante o começo limpo
+    dlg.reject()                                    # a rede só é solta por este teste: se reject() esperasse, travaria aqui
+    assert not solta.is_set()                       # ...e a requisição continua pendente depois de fechar
     assert len(gui._ORFAOS) == 1
+    orfao = next(iter(gui._ORFAOS))
     solta.set()
-    limite = time.monotonic() + 5
-    while gui._ORFAOS and time.monotonic() < limite:
-        app.processEvents()
-        time.sleep(0.01)
+    assert orfao.wait(5000)                         # join da thread: sem polling nem medida de tempo
+    app.processEvents()                             # entrega o finished, que tira a órfã do conjunto
     assert not gui._ORFAOS
     assert dlg.resultado() is None and dlg.lista.count() == 0
 

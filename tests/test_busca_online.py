@@ -24,11 +24,13 @@ def app(monkeypatch):
     return QApplication.instance() or QApplication([])
 
 
-def esperar(app, condicao, limite=5):
+def esperar(app, condicao, limite=20):
+    """Deixa o Qt processar eventos (threads da busca entregam o resultado por sinal) até a condição valer.
+    O limite só existe para o teste falhar em vez de travar; em máquina carregada é folgado de propósito."""
     fim = time.monotonic() + limite
     while not condicao() and time.monotonic() < fim:
         app.processEvents()
-        time.sleep(0.005)
+        time.sleep(0.005)                 # cede a CPU (QTest.qWait também entregaria DeferredDelete e quebra estes testes)
     app.processEvents()
     assert condicao()
 
