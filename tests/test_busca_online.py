@@ -8,12 +8,12 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from tagger.nucleo import busca, discogs, lastfm, online  # noqa: E402
+from tagger.nucleo import busca, discogs, online  # noqa: E402
 from tagger.nucleo.busca import ErroBusca, NAO_ENCONTRADO  # noqa: E402
 from tagger.nucleo.metadata import Faixa  # noqa: E402
 
 from tests.test_online import (  # noqa: E402
-    INFO, TOP, TOKEN, VINIL, BUSCA_DISCOGS, Rede, Resposta, limitador_falso,
+    TOKEN, VINIL, BUSCA_DISCOGS, Rede, Resposta, limitador_falso,
 )
 
 
@@ -43,12 +43,6 @@ def fonte_discogs(respostas):
     return FonteDiscogs(discogs.ClienteDiscogs(TOKEN, Rede(respostas), lim, online.Cache(10 ** 6)))
 
 
-def fonte_lastfm(respostas):
-    lim, _ = limitador_falso()
-    from tagger.gui.busca_online import FonteLastfm
-    return FonteLastfm(lastfm.ClienteLastfm("chave-lastfm-0123456789", Rede(respostas), lim, online.Cache(10 ** 6)))
-
-
 class MusicBrainzVazio:
     nome, tem_capa = "musicbrainz", True
 
@@ -59,15 +53,15 @@ class MusicBrainzVazio:
 def dialogo(fontes, faixas=None, **kw):
     from tagger.gui.busca_online import DialogoBuscaOnline
     faixas = faixas or [faixa("1.mp3", title="Abertura", artist="Banda", album="Disco Raro")]
-    todas = {"musicbrainz": MusicBrainzVazio(), "discogs": None, "lastfm": None, **fontes}
+    todas = {"musicbrainz": MusicBrainzVazio(), "discogs": None, **fontes}
     return DialogoBuscaOnline(faixas, fontes=todas, **kw)
 
 
 def test_servico_sem_credencial_fica_desabilitado_com_dica(app):
     from tagger.nucleo.credenciais import DICAS
     dlg = dialogo({})
-    assert not dlg.botoes_fonte["discogs"].isEnabled() and not dlg.botoes_fonte["lastfm"].isEnabled()
-    assert dlg.botoes_fonte["lastfm"].toolTip() == DICAS["lastfm"]
+    assert not dlg.botoes_fonte["discogs"].isEnabled()
+    assert dlg.botoes_fonte["discogs"].toolTip() == DICAS["discogs"]
     assert not dlg.ck_alternativa.isEnabled()
     dlg.reject()
 
@@ -109,20 +103,6 @@ def test_musicbrainz_sem_resultado_usa_o_discogs(app):
     dlg.reject()
 
 
-def test_lastfm_versoes_pelo_playcount_e_links(app):
-    dlg = dialogo({"lastfm": fonte_lastfm({"getTopAlbums": Resposta(TOP), "album.getInfo": Resposta(INFO)})},
-                  faixas=[faixa("2.mp3", title="segunda", artist="Banda", album="Album X")], fonte_inicial="lastfm")
-    dlg.buscar()
-    esperar(app, lambda: dlg.lista.count() == 3 and dlg.previa.rowCount() > 0)
-    textos = [dlg.lista.item(i).text() for i in range(dlg.lista.count())]
-    assert textos[0].startswith("Banda — Album X  (9.000") and "mais scrobblado" in textos[0]
-    texto = dlg.atribuicao.text()
-    assert "powered by AudioScrobbler" in texto
-    assert 'href="https://www.last.fm/music/Banda"' in texto and 'href="https://www.last.fm/music/Banda/Album+X"' in texto
-    dlg.aplicar()
-    assert dlg.resultado().alteracoes[0][1]["title"] == "Segunda"
-
-
 def test_erro_mostrado_sem_credencial(app):
     class Vaza:
         nome, tem_capa = "discogs", False
@@ -160,12 +140,12 @@ def test_sobre_tem_o_aviso_do_discogs():
     assert "Zink Media, LLC" in texto_sobre()
 
 
-def test_criar_fontes_sem_credencial(monkeypatch, tmp_path):
+def test_criar_fontes_com_e_sem_credencial(monkeypatch):
     from tagger.gui import busca_online
-    monkeypatch.setattr(busca_online.credenciais, "lastfm_api_key", lambda v: None)
     monkeypatch.setattr(busca_online.credenciais, "discogs_authorization", lambda v: "Discogs token=" + v if v else None)
-    fontes = busca_online.criar_fontes({"lastfm_api_key": "", "discogs_token": "tok"}, tmp_path)
-    assert fontes["lastfm"] is None and fontes["discogs"] is not None
+    fontes = busca_online.criar_fontes({"discogs_token": "tok"})
+    assert set(fontes) == {"musicbrainz", "discogs"} and fontes["discogs"] is not None
+    assert busca_online.criar_fontes({"discogs_token": ""})["discogs"] is None
     assert isinstance(fontes["musicbrainz"].cliente, busca.ClienteMusicBrainz)
 
 
@@ -219,7 +199,7 @@ def test_servicos_mudaram_com_a_janela_aberta(app, monkeypatch):
     assert not dlg.botoes_fonte["discogs"].isEnabled() and dlg.fonte == "musicbrainz"
     assert dlg.botoes_fonte["discogs"].toolTip() == "Sem token agora" and not dlg.ck_alternativa.isEnabled()
     monkeypatch.setattr(busca_online, "credenciais_resolvidas",
-                        lambda config: {"discogs": "Discogs token=" + config["discogs_token"], "lastfm": None})
+                        lambda config: {"discogs": "Discogs token=" + config["discogs_token"]})
     dlg.atualizar_servicos({"discogs": SimpleNamespace(disponivel=True, dica=None)},
                            {"discogs_token": "tokenNovo0123456789abcdef"})
     assert dlg.botoes_fonte["discogs"].isEnabled() and dlg.ck_alternativa.isEnabled()
@@ -230,7 +210,7 @@ def test_servicos_mudaram_com_a_janela_aberta(app, monkeypatch):
 @pytest.fixture
 def discogs_falso(monkeypatch):
     """Todo ClienteDiscogs criado pela janela usa a rede simulada; devolve a lista de pedidos."""
-    for nome in ("TAGGER_DISCOGS_TOKEN", "TAGGER_DISCOGS_KEY", "TAGGER_DISCOGS_SECRET", "TAGGER_LASTFM_API_KEY"):
+    for nome in ("TAGGER_DISCOGS_TOKEN", "TAGGER_DISCOGS_KEY", "TAGGER_DISCOGS_SECRET"):
         monkeypatch.delenv(nome, raising=False)
     from tagger.nucleo import credenciais
     monkeypatch.setattr(credenciais, "ler_embutidas", lambda pasta=None, avisar=True: {})
@@ -298,8 +278,8 @@ def test_credencial_muda_com_consulta_rodando_sem_quebrar(app, monkeypatch):
 
     lenta = Lenta()
     dlg = dialogo({"discogs": lenta}, fonte_inicial="discogs")
-    monkeypatch.setattr(busca_online, "credenciais_resolvidas", lambda config: {"discogs": "outra", "lastfm": None})
-    monkeypatch.setattr(busca_online, "criar_fonte", lambda nome, credencial, pasta=None: FonteContada())
+    monkeypatch.setattr(busca_online, "credenciais_resolvidas", lambda config: {"discogs": "outra"})
+    monkeypatch.setattr(busca_online, "criar_fonte", lambda nome, credencial: FonteContada())
 
     dlg.buscar()                                          # 1) muda durante a busca
     dlg.atualizar_servicos({}, {"discogs_token": "x"})

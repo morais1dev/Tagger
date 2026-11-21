@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-CHAVE = "chave-colada-0123456789"
+CHAVE = "token-colado-0123456789"
 
 
 @pytest.fixture
@@ -28,13 +28,12 @@ def test_previa_ao_vivo_nunca_leva_a_chave(app, config):
     dlg = DialogoConfiguracoes(config)
     emitidos = []
     dlg.mudou.connect(emitidos.append)
-    dlg.ed_lastfm.setText(CHAVE)
-    dlg.ed_discogs.setText("token-colado-0123456789")
+    dlg.ed_discogs.setText(CHAVE)
     dlg.ck_agrupar.setChecked(not config["agrupar_por_album"])    # outra mudança, que vai para a prévia
     dlg._restaurar_padroes()
     assert emitidos
-    assert all(c["lastfm_api_key"] == "" and c["discogs_token"] == "" for c in emitidos)
-    assert dlg.credenciais_aceitas() == {"lastfm_api_key": CHAVE, "discogs_token": "token-colado-0123456789"}
+    assert all(c["discogs_token"] == "" for c in emitidos)
+    assert dlg.credenciais_aceitas() == {"discogs_token": CHAVE}
 
 
 class _Sinal:
@@ -56,7 +55,7 @@ def _abrir(monkeypatch, config, aceitar):
             super().__init__(cfg)
 
         def exec(self):
-            self.ed_lastfm.setText(CHAVE)
+            self.ed_discogs.setText(CHAVE)
             self.ck_agrupar.setChecked(True)
             self.accept() if aceitar else self.reject()
             return 0
@@ -73,14 +72,14 @@ def _abrir(monkeypatch, config, aceitar):
 
 def test_cancelar_nao_deixa_a_chave_na_sessao(app, config, monkeypatch):
     falsa, salvos = _abrir(monkeypatch, config, aceitar=False)
-    assert falsa.config["lastfm_api_key"] == ""
+    assert falsa.config["discogs_token"] == ""
     assert falsa.config["agrupar_por_album"] is False       # a prévia também volta
     assert salvos == [] and falsa.servicos_mudaram.emitidos == []
 
 
 def test_ok_aplica_salva_e_avisa(app, config, monkeypatch):
     falsa, salvos = _abrir(monkeypatch, config, aceitar=True)
-    assert falsa.config["lastfm_api_key"] == CHAVE
-    assert salvos and salvos[-1]["lastfm_api_key"] == CHAVE
+    assert falsa.config["discogs_token"] == CHAVE
+    assert salvos and salvos[-1]["discogs_token"] == CHAVE
     [estado] = falsa.servicos_mudaram.emitidos
-    assert estado["lastfm"].disponivel
+    assert estado["discogs"].disponivel

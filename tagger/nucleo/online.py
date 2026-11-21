@@ -1,5 +1,5 @@
 """
-Peças comuns aos clientes do Discogs e do Last.fm (sem Qt, só urllib).
+Peças comuns aos clientes do Discogs (sem Qt, só urllib).
 
 - `ocultar`: o ÚNICO ponto que limpa credenciais de mensagens de erro de rede (via credenciais.py);
 - `LimitadorJanela`: no máximo N requisições numa janela de tempo deslizante;
@@ -243,7 +243,7 @@ class RedirecionamentoRecusado(urllib.error.URLError):
 
 
 class _RedirecionamentoSeguro(urllib.request.HTTPRedirectHandler):
-    """Redirecionamento só para https (a api_key do Last.fm vai na URL). E o urllib repassa o
+    """Redirecionamento só para https (credenciais podem ir na URL). E o urllib repassa o
     Authorization num redirecionamento: para outra origem (esquema, host, porta), tira.
     (O Discogs ainda manda o Authorization com add_unredirected_header, que nunca é repassado.)"""
 
