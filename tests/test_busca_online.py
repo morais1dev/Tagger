@@ -24,11 +24,13 @@ def app(monkeypatch):
     return QApplication.instance() or QApplication([])
 
 
-def esperar(app, condicao, limite=5):
+def esperar(app, condicao, limite=20):
+    """Deixa o Qt processar eventos (threads da busca entregam o resultado por sinal) até a condição valer.
+    O limite só existe para o teste falhar em vez de travar; em máquina carregada é folgado de propósito."""
     fim = time.monotonic() + limite
     while not condicao() and time.monotonic() < fim:
         app.processEvents()
-        time.sleep(0.005)
+        time.sleep(0.005)                 # cede a CPU (QTest.qWait também entregaria DeferredDelete e quebra estes testes)
     app.processEvents()
     assert condicao()
 
@@ -98,8 +100,9 @@ def test_musicbrainz_sem_resultado_usa_o_discogs(app):
     assert dlg.fonte == "musicbrainz" and dlg.ck_alternativa.isChecked()
     dlg.buscar()
     esperar(app, lambda: dlg.lista.count() == 1)
+    # só depois do detalhe (prévia pronta) o estado volta a trazer o aviso: antes disso mostra "Baixando dados..."
+    esperar(app, lambda: dlg.btn_aplicar.isEnabled() and "Confira a prévia" in dlg.estado.text())
     assert "Discogs" in dlg.estado.text() and "Data provided by Discogs." in dlg.atribuicao.text()
-    esperar(app, lambda: dlg.btn_aplicar.isEnabled())
     dlg.reject()
 
 

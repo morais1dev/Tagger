@@ -5,6 +5,7 @@ precisa (cabeçalhos com duração de 2 s); o áudio em si é lixo, o que basta 
 """
 
 import struct
+import sys
 
 import pytest
 from mutagen.ogg import OggPage
@@ -108,3 +109,53 @@ def criar_audio(tmp_path):
 def opus(tmp_path):
     """Um Ogg Opus sem tags, com a extensão .ogg (o Tagger descobre o codec ao abrir)."""
     return criar_opus(tmp_path / "opus.ogg")
+
+
+def _esperar_orfaos(limite_ms=10000):
+    """Espera (join da QThread, sem polling nem dormir) as threads de busca soltas por um diálogo fechado.
+
+    `_ORFAOS` é estado global do módulo: uma thread órfã de um teste anterior contaminaria a contagem do
+    próximo. Só age se a GUI já foi importada (testes sem Qt não pagam nada).
+    """
+    gui = sys.modules.get("tagger.gui.busca")
+    if gui is None or not gui._ORFAOS:
+        return
+    from PySide6.QtWidgets import QApplication
+    for trabalho in list(gui._ORFAOS):
+        assert trabalho.wait(limite_ms), "thread de busca órfã não terminou"
+    app = QApplication.instance()
+    if app is not None:
+        app.processEvents()            # entrega o finished -> _ORFAOS.discard
+    assert not gui._ORFAOS, "sobrou thread órfã depois de esperar"
+
+
+@pytest.fixture(autouse=True)
+def sem_orfaos():
+    """Cada teste começa e termina sem threads de busca órfãs (estado global de gui.busca)."""
+    _esperar_orfaos()
+    yield
+    _esperar_orfaos()
+
+
+@pytest.fixture(autouse=True)
+def qsettings_isolado(tmp_path_factory, monkeypatch):
+    """QSettings("Tagger", "Tagger") (janela.py e erros.py) vira um INI numa pasta temporária.
+
+    QSettings(org, app) sempre usa o formato nativo (o registro no Windows) e ignora setDefaultFormat;
+    por isso o nome QSettings é trocado nesses módulos por uma fábrica que devolve um INI no tmp.
+    Devolve a pasta, para os testes conferirem. Nunca cria chave no registro real.
+    """
+    try:
+        from PySide6.QtCore import QSettings
+        from tagger.gui import erros, janela
+    except ImportError:
+        yield None
+        return
+    pasta = tmp_path_factory.mktemp("qsettings")
+
+    def fabrica(*_args, **_kwargs):
+        return QSettings(str(pasta / "Tagger.ini"), QSettings.IniFormat)
+
+    monkeypatch.setattr(erros, "QSettings", fabrica)
+    monkeypatch.setattr(janela, "QSettings", fabrica)
+    yield pasta
