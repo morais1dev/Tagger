@@ -9,7 +9,7 @@ import pytest
 
 from tagger.nucleo import credenciais
 from tagger.nucleo.credenciais import (
-    FormatadorSemCredenciais, discogs_authorization, discogs_disponivel, lastfm_api_key, lastfm_disponivel,
+    FormatadorSemCredenciais, discogs_authorization, discogs_disponivel,
     ler_embutidas, ocultar_credenciais,
 )
 
@@ -37,34 +37,49 @@ def gravar(pasta, conteudo):
 
 # --- ordem de prioridade -------------------------------------------------------------------------------
 
-def test_lastfm_configuracoes_vencem_ambiente_e_arquivo(pasta, monkeypatch):
-    gravar(pasta, {"lastfm_api_key": "do-arquivo"})
-    monkeypatch.setenv("TAGGER_LASTFM_API_KEY", "do-ambiente")
-    assert lastfm_api_key("da-config") == "da-config"
+def test_discogs_configuracoes_vencem_ambiente_e_arquivo(pasta, monkeypatch):
+    gravar(pasta, {"discogs_key": "k-arquivo", "discogs_secret": "s-arquivo"})
+    monkeypatch.setenv("TAGGER_DISCOGS_TOKEN", "do-ambiente")
+    assert discogs_authorization("da-config") == "Discogs token=da-config"
 
 
-def test_lastfm_ambiente_vence_arquivo(pasta, monkeypatch):
-    gravar(pasta, {"lastfm_api_key": "do-arquivo"})
-    monkeypatch.setenv("TAGGER_LASTFM_API_KEY", "do-ambiente")
-    assert lastfm_api_key("") == "do-ambiente"
-    assert lastfm_api_key(None) == "do-ambiente"
+def test_discogs_ambiente_vence_arquivo(pasta, monkeypatch):
+    gravar(pasta, {"discogs_key": "k-arquivo", "discogs_secret": "s-arquivo"})
+    monkeypatch.setenv("TAGGER_DISCOGS_TOKEN", "do-ambiente")
+    assert discogs_authorization("") == "Discogs token=do-ambiente"
+    assert discogs_authorization(None) == "Discogs token=do-ambiente"
 
 
-def test_lastfm_cai_para_o_arquivo(pasta):
-    gravar(pasta, {"lastfm_api_key": "do-arquivo"})
-    assert lastfm_api_key(None) == "do-arquivo"
-    assert lastfm_disponivel(None)
+def test_discogs_cai_para_o_arquivo(pasta):
+    gravar(pasta, {"discogs_key": "k-arquivo", "discogs_secret": "s-arquivo"})
+    assert discogs_authorization(None) == "Discogs key=k-arquivo, secret=s-arquivo"
+    assert discogs_disponivel(None)
 
 
-def test_lastfm_sem_nada_e_none(pasta):
-    assert lastfm_api_key(None) is None
-    assert not lastfm_disponivel("")
+def test_discogs_sem_nada_e_none(pasta):
+    assert discogs_authorization(None) is None
+    assert not discogs_disponivel("")
+
+
+def test_chave_antiga_no_arquivo_e_ignorada(pasta):
+    """chaves.json de versões anteriores (com a chave de uma API removida) não quebra nada nem vira credencial."""
+    gravar(pasta, {"lastfm_api_key": "sobra-antiga-0123456789", "discogs_key": "k", "discogs_secret": "s"})
+    assert ler_embutidas(pasta) == {"discogs_key": "k", "discogs_secret": "s"}
+    assert "sobra-antiga-0123456789" not in credenciais.credenciais_conhecidas(pasta=pasta)
+    gravar(pasta, {"lastfm_api_key": "sobra-antiga-0123456789"})
+    assert ler_embutidas(pasta) == {} and not discogs_disponivel(None)
+
+
+def test_chave_antiga_nas_configuracoes_e_ignorada():
+    config = {"lastfm_api_key": "chave-colada-antiga-0123456789", "discogs_token": ""}
+    assert credenciais.credenciais_da_config(config) == ()
+    assert not credenciais.estado_servicos(config)["discogs"].disponivel
 
 
 def test_valores_so_com_espacos_sao_ignorados(pasta, monkeypatch):
-    gravar(pasta, {"lastfm_api_key": "  do-arquivo  "})
-    monkeypatch.setenv("TAGGER_LASTFM_API_KEY", "   ")
-    assert lastfm_api_key("  \t ") == "do-arquivo"
+    gravar(pasta, {"discogs_key": "  k-arquivo  ", "discogs_secret": "s-arquivo"})
+    monkeypatch.setenv("TAGGER_DISCOGS_TOKEN", "   ")
+    assert discogs_authorization("  \t ") == "Discogs key=k-arquivo, secret=s-arquivo"
 
 
 def test_pasta_no_exe_usa_meipass(monkeypatch, tmp_path):
@@ -83,7 +98,6 @@ def test_pasta_fora_do_exe_e_a_do_modulo():
 def test_arquivo_vazio_ou_invalido_e_sem_chave(pasta, conteudo):
     gravar(pasta, conteudo)
     assert ler_embutidas() == {}
-    assert lastfm_api_key(None) is None
     assert discogs_authorization(None) is None
 
 
@@ -94,12 +108,12 @@ def test_arquivo_ausente_e_sem_chave(pasta, caplog):
 
 
 def test_arquivo_com_bom_e_lido(pasta):
-    (pasta / "chaves.json").write_text(json.dumps({"lastfm_api_key": "com-bom"}), encoding="utf-8-sig")
-    assert lastfm_api_key(None) == "com-bom"
+    (pasta / "chaves.json").write_text(json.dumps({"discogs_key": "k", "discogs_secret": "s"}), encoding="utf-8-sig")
+    assert discogs_authorization(None) == "Discogs key=k, secret=s"
 
 
 def test_arquivo_invalido_avisa_no_log_sem_valores(pasta, caplog):
-    gravar(pasta, '{"lastfm_api_key": "valor-que-nao-pode-aparecer"')
+    gravar(pasta, '{"discogs_key": "valor-que-nao-pode-aparecer"')
     with caplog.at_level(logging.WARNING, logger="tagger"):
         assert ler_embutidas() == {}
     assert len(caplog.records) == 1
@@ -110,7 +124,7 @@ def test_arquivo_invalido_avisa_uma_vez_so(pasta, caplog):
     gravar(pasta, "{quebrado de novo")
     with caplog.at_level(logging.WARNING, logger="tagger"):
         for _ in range(3):
-            lastfm_api_key(None)
+            discogs_authorization(None)
     assert len(caplog.records) == 1
 
 
@@ -124,20 +138,20 @@ def test_ocultar_nao_avisa_nem_entra_em_recursao(pasta, caplog):
 def test_no_exe_le_o_arquivo_uma_vez(monkeypatch, tmp_path):
     pasta = tmp_path / "tagger" / "nucleo"
     pasta.mkdir(parents=True)
-    gravar(pasta, {"lastfm_api_key": "primeira"})
+    gravar(pasta, {"discogs_key": "primeira", "discogs_secret": "s"})
     monkeypatch.setattr(credenciais.sys, "frozen", True, raising=False)
     monkeypatch.setattr(credenciais.sys, "_MEIPASS", str(tmp_path), raising=False)
     credenciais._ler_em_cache.cache_clear()
     try:
-        assert lastfm_api_key(None) == "primeira"
-        gravar(pasta, {"lastfm_api_key": "segunda"})
-        assert lastfm_api_key(None) == "primeira"
+        assert discogs_authorization(None) == "Discogs key=primeira, secret=s"
+        gravar(pasta, {"discogs_key": "segunda", "discogs_secret": "s"})
+        assert discogs_authorization(None) == "Discogs key=primeira, secret=s"
     finally:
         credenciais._ler_em_cache.cache_clear()
 
 
 def test_arquivo_ignora_valores_vazios_e_nao_texto(pasta):
-    gravar(pasta, {"lastfm_api_key": "   ", "discogs_key": 123, "discogs_secret": "s"})
+    gravar(pasta, {"discogs_key": 123, "discogs_secret": "s"})
     assert ler_embutidas() == {"discogs_secret": "s"}
 
 
@@ -183,8 +197,8 @@ def test_discogs_sem_secret_e_none(pasta):
 # --- ocultar_credenciais -------------------------------------------------------------------------------
 
 def test_oculta_api_key_na_url(pasta):
-    url = "https://ws.audioscrobbler.com/2.0/?method=album.getinfo&api_key=abc123&format=json"
-    assert ocultar_credenciais(url) == ("https://ws.audioscrobbler.com/2.0/?method=album.getinfo"
+    url = "https://api.exemplo.com/2.0/?method=album.getinfo&api_key=abc123&format=json"
+    assert ocultar_credenciais(url) == ("https://api.exemplo.com/2.0/?method=album.getinfo"
                                         "&api_key=***&format=json")
     assert ocultar_credenciais("...?api_key%3Dabc123%26x") == "...?api_key%3D***%26x"
 
@@ -201,7 +215,7 @@ def test_oculta_cabecalho_discogs_com_key_secret(pasta):
 
 
 def test_oculta_credencial_literal_num_traceback(pasta, monkeypatch):
-    gravar(pasta, {"lastfm_api_key": "chave-embutida-123"})
+    gravar(pasta, {"discogs_key": "chave-embutida-123", "discogs_secret": "s"})
     monkeypatch.setenv("TAGGER_DISCOGS_TOKEN", "token-do-ambiente")
     rastro = ("Traceback (most recent call last):\n"
               '  File "busca.py", line 10, in buscar\n'
@@ -229,8 +243,6 @@ def test_oculta_credencial_literal_num_traceback(pasta, monkeypatch):
     ("x%3Fapi_key%3Dabc123", "x%3Fapi_key%3D***"),
     ("x%3fapi_key%3dabc123%26y", "x%3fapi_key%3d***%26y"),
     ("x%26key%3Dk1%26secret%3Ds1", "x%26key%3D***%26secret%3D***"),
-    ("lastfm_api_key=ABC", "lastfm_api_key=***"),
-    ("{'lastfm_api_key': 'ABC'}", "{'lastfm_api_key': '***'}"),
     ("TAGGER_DISCOGS_TOKEN=TOK", "TAGGER_DISCOGS_TOKEN=***"),
     ("discogs_secret: S1", "discogs_secret: ***"),
     ("discogs_key=K1 resto", "discogs_key=*** resto"),
@@ -288,24 +300,22 @@ def gerar_chaves():
 
 def test_gerar_chaves_grava_o_json(gerar_chaves, tmp_path, capsys):
     destino = tmp_path / "nucleo" / "chaves.json"
-    avisos = gerar_chaves.gerar(destino, {"LASTFM_API_KEY": " lf ", "DISCOGS_KEY": "dk", "DISCOGS_SECRET": "ds"})
+    avisos = gerar_chaves.gerar(destino, {"LASTFM_API_KEY": "lf", "DISCOGS_KEY": " dk ", "DISCOGS_SECRET": "ds"})
     assert avisos == []
     assert json.loads(destino.read_text(encoding="utf-8")) == {
-        "lastfm_api_key": "lf", "discogs_key": "dk", "discogs_secret": "ds"}
-    assert ler_embutidas(destino.parent) == {"lastfm_api_key": "lf", "discogs_key": "dk", "discogs_secret": "ds"}
+        "discogs_key": "dk", "discogs_secret": "ds"}
+    assert ler_embutidas(destino.parent) == {"discogs_key": "dk", "discogs_secret": "ds"}
 
 
 def test_gerar_chaves_avisa_sem_falhar_e_nao_imprime_valores(gerar_chaves, tmp_path, monkeypatch, capsys):
     destino = tmp_path / "chaves.json"
     monkeypatch.setattr(gerar_chaves, "DESTINO", destino)
-    monkeypatch.setenv("LASTFM_API_KEY", "valor-secreto-lastfm")
     monkeypatch.setenv("DISCOGS_KEY", "valor-secreto-key")
     monkeypatch.delenv("DISCOGS_SECRET", raising=False)
     assert gerar_chaves.main() == 0
     saida = capsys.readouterr()
     texto = saida.out + saida.err
     assert "::warning::Sem DISCOGS_SECRET:" in texto
-    assert "LASTFM_API_KEY" not in texto
     assert "valor-secreto" not in texto
     assert json.loads(destino.read_text(encoding="utf-8"))["discogs_secret"] == ""
 
@@ -313,26 +323,24 @@ def test_gerar_chaves_avisa_sem_falhar_e_nao_imprime_valores(gerar_chaves, tmp_p
 # --- estado para a GUI ---------------------------------------------------------------------------------
 
 def test_estado_servicos_sem_nada_traz_dicas(pasta):
-    estado = credenciais.estado_servicos({"lastfm_api_key": "", "discogs_token": "  "})
-    assert not estado["lastfm"].disponivel and "Configurações" in estado["lastfm"].dica
+    estado = credenciais.estado_servicos({"discogs_token": "  "})
     assert not estado["discogs"].disponivel and "token" in estado["discogs"].dica
     assert credenciais.estado_servicos(None) == estado
 
 
 def test_estado_servicos_com_valores_da_config(pasta):
-    estado = credenciais.estado_servicos({"lastfm_api_key": "minha", "discogs_token": "meu"})
-    assert estado["lastfm"] == credenciais.EstadoServico(True, None)
+    estado = credenciais.estado_servicos({"discogs_token": "meu"})
     assert estado["discogs"] == credenciais.EstadoServico(True, None)
 
 
 def test_estado_servicos_com_chaves_embutidas(pasta):
-    gravar(pasta, {"lastfm_api_key": "lf", "discogs_key": "k", "discogs_secret": "s"})
+    gravar(pasta, {"discogs_key": "k", "discogs_secret": "s"})
     estado = credenciais.estado_servicos({})
-    assert estado["lastfm"].disponivel and estado["discogs"].disponivel
+    assert estado["discogs"].disponivel
 
 
 def test_credenciais_da_config_vao_para_a_ocultacao(pasta):
-    config = {"lastfm_api_key": " chave-colada-0123456789 ", "discogs_token": "", "tema_escuro": "grafite"}
+    config = {"discogs_token": " chave-colada-0123456789 ", "tema_escuro": "grafite"}
     assert credenciais.credenciais_da_config(config) == ("chave-colada-0123456789",)
     texto = ocultar_credenciais("falhou com chave-colada-0123456789", credenciais.credenciais_da_config(config))
     assert texto == "falhou com ***"
