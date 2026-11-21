@@ -1,6 +1,6 @@
 # ADR 0001 — Stack da v3: Tauri 2, núcleo Rust com lofty, interface React + TypeScript
 
-- **Status:** Proposta — aguardando aprovação humana
+- **Status:** Aceita — aprovada pelo humano em 2026-11-21
 - **Data:** 2026-11-21
 - **Base:** spike T2.1, [docs/spike/tauri.md](../spike/tauri.md) (código em `spike/tauri/`)
 
