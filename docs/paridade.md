@@ -1,0 +1,330 @@
+# Matriz de paridade v2.3 → v3
+
+Lista de tudo o que um usuário consegue fazer na v2.3 (Python + PySide6), com o módulo de núcleo e o componente de interface previstos na v3 e o teste que hoje cobre cada item. A v3 só está pronta quando todas as linhas estiverem como `ok`, ou explicitamente movidas para "Fica fora da v3".
+
+**Fontes cruzadas:** `CHANGELOG.md` (1.0.0 a 2.3.0), `readme.md`, `docs/ARQUITETURA.md`, `tagger/cli.py` e o código de `tagger/gui/` e `tagger/nucleo/` (menus, atalhos, diálogos, Configurações). Os testes pytest da v2 (`tests/`) são a especificação do comportamento; a v2 fica no `main` até a v3.0.
+
+## Como ler
+
+- **Núcleo:** módulo da v2 em `tagger/nucleo/` → módulo previsto no crate `core/` (`tagger-core`, Rust, sem Tauri e sem interface). Os nomes dos módulos Rust são uma **proposta** (caminhos relativos a `core/src/`); o dono do núcleo pode ajustá-los, mas a linha deve continuar apontando para algum módulo.
+- **Interface:** tela ou diálogo da v2 em `tagger/gui/` → componente previsto em `app/src/` (React + TypeScript). O `app/src-tauri` só faz a ponte com o núcleo e não aparece aqui, a não ser quando a funcionalidade é do sistema (janela, arquivos, pasta de dados).
+- **Teste:** arquivo pytest que cobre o comportamento hoje. `—` significa que a v2 **não tem teste** para a funcionalidade (a v3 deve criar um, no Rust, no front ou ponta a ponta). `GUI` quer dizer que o teste usa a janela real em modo offscreen.
+- **Status:** `pendente` (nada feito), `em andamento`, `ok` (comportamento igual ao da v2, com teste) ou `fora` (decidido que não volta).
+- **Id:** `A-01` etc., para citar a linha em tarefas e revisões.
+
+### Mapa de módulos (v2 → v3)
+
+| v2 | v3 (previsto) |
+|---|---|
+| `nucleo/metadata.py` (+ `formatos/__init__.py`) | `core/src/tags.rs` (campos, validação, `Faixa`, leitura/gravação, limpeza), `core/src/capa.rs` (regra da capa frontal) |
+| `nucleo/metadata.py` (parte ID3) | `core/src/formatos/id3.rs` (lofty `Id3v2Tag`, com o patch do `TCON`, ADR 0001) |
+| `nucleo/formatos/vorbis.py` | `core/src/formatos/vorbis.rs` (FLAC e Ogg) |
+| `nucleo/formatos/mp4.py` | `core/src/formatos/mp4.rs` (lofty `Ilst`) |
+| `nucleo/rascunho.py` | `core/src/rascunho.rs` |
+| `nucleo/historico.py` | `core/src/historico.rs` |
+| `nucleo/padroes.py` | `core/src/padroes.rs` |
+| `nucleo/organizar.py` | `core/src/organizar.rs` |
+| `nucleo/agrupar.py` | `core/src/agrupar.rs` |
+| `nucleo/busca.py` | `core/src/busca/musicbrainz.rs` (+ `capa` do Cover Art Archive) |
+| `nucleo/discogs.py` | `core/src/busca/discogs.rs` |
+| `nucleo/online.py` | `core/src/busca/rede.rs` (limitador, cache, URL segura, redirecionamento sem vazar) |
+| `nucleo/credenciais.py` | `core/src/credenciais.rs` |
+| `nucleo/atualizacao.py` | `core/src/atualizacao.rs` |
+| `gui/config.py` | `core/src/config.rs` (valores padrão e conversão) + armazenamento na ponte Tauri |
+| `gui/erros.py` (log) | `core/src/log.rs` + ponte Tauri (pasta de dados) |
+| `gui/*.py` | `app/src/` (componentes, listados em cada linha) |
+
+---
+
+## A. Abrir e carregar arquivos
+
+| Id | Funcionalidade | Núcleo (v2 → v3) | Interface (v2 → v3) | Teste | Status |
+|---|---|---|---|---|---|
+| A-01 | Abrir pasta (botão "Abrir pasta", `Ctrl+O`, botão da tela inicial); lembra a última pasta usada no seletor | `metadata.listar_audios` → `tags.rs` (`listar_audios`) | `janela.abrir_pasta` + `QFileDialog` → `app/src/components/BarraTopo` + diálogo de pasta (ponte Tauri) | `test_interface.py` (GUI, sem o seletor) | pendente |
+| A-02 | Adicionar arquivos soltos ("Adicionar arquivos"; "Escolher arquivos" na tela inicial), sem trocar a lista quando já há faixas | `metadata.carregar_varios` → `tags.rs` | `janela.adicionar_arquivos` → `BarraTopo` / `TelaVazia` | `test_interface.py` (GUI, parcial) | pendente |
+| A-03 | Arrastar e soltar pastas ou arquivos de áudio na janela; só aceita pasta ou formato suportado; borda de destaque na tela vazia e aviso "Solte para adicionar à lista" sobre a tabela | `metadata.formato` → `tags.rs` | `janela.dragEnterEvent/dropEvent`, `vazio.destacar`, `overlay_drop` → `Janela` (eventos de arrastar do Tauri) + `TelaVazia` + `TabelaFaixas` | — | pendente |
+| A-04 | Abrir arquivos ou pastas passados na linha de comando (ou arrastados sobre o `.exe`): `Tagger.exe "D:\Música\Álbum"` | `listar_audios` → `tags.rs` | `janela.main` (`sys.argv`) → `app/src-tauri` (argumentos de inicialização) | — | pendente |
+| A-05 | Incluir subpastas ao abrir uma pasta (opção em Configurações, ligada por padrão); o texto da tela inicial muda junto | `metadata.listar_audios(recursivo)` → `tags.rs` | `configuracoes.ck_subpastas`, `vazio.definir_subpastas` → `Configuracoes/Comportamento`, `TelaVazia` | — | pendente |
+| A-06 | Leitura em segundo plano com barra de progresso ("Lendo arquivos… i/n") e janela sem travar; aviso "Aguarde: ainda estou trabalhando…" se pedir outra operação | `metadata.carregar_varios(progresso)` → `tags.rs` (assíncrono) | `janela.Carregador`, `_mostrar_progresso`, `_ocupado` → `BarraStatus` + estado de ocupado | — | pendente |
+| A-07 | Arquivo ilegível ou corrompido não impede a pasta de carregar: é contado e avisado ("N arquivo(s) não puderam ser lidos") | `metadata.carregar` (devolve `None`/falha) → `tags.rs` | `janela._ao_carregar` → `BarraStatus` (aviso de erro) | `test_metadata.py` (`test_arquivo_invalido`, `test_leitura_fragil_vira_falha`, `test_outro_arquivo_invalido`) | pendente |
+| A-08 | Pasta sem áudio suportado: aviso "Nenhum arquivo de áudio encontrado (formatos…)" e a tela não muda | `listar_audios` → `tags.rs` | `janela.carregar_caminhos` → `BarraStatus` | `test_interface.py` (GUI) | pendente |
+| A-09 | Tela inicial (nenhum arquivo): zona de soltar, botões "Abrir pasta" e "Escolher arquivos", dica `Ctrl O abre uma pasta`, formatos aceitos e aviso de que nada é gravado até salvar | `nomes_formatos` → `tags.rs` | `vazio.TelaVazia` → `app/src/components/TelaVazia` | — | pendente |
+| A-10 | Pastas recentes na tela inicial (até 6, só as que ainda existem), clique ou `Enter`/`Espaço` abre; `Delete` ou o botão "×" tira da lista; tooltip com o caminho completo | — (só interface e armazenamento) | `vazio.LinhaRecente`, `janela._lembrar_recente/_esquecer_recente` → `TelaVazia/Recentes` + armazenamento de preferências | — | pendente |
+| A-11 | Reabrir a última pasta ao iniciar (opção em Configurações, desligada por padrão) | — | `janela.__init__` (`reabrir_ultima`), `configuracoes.ck_reabrir` → `Configuracoes/Comportamento` + inicialização do app | — | pendente |
+| A-12 | Migalha com o caminho da pasta aberta (ou "Arquivos avulsos"), com tooltip do caminho; acompanha os arquivos quando são movidos para outra pasta (organizar, desfazer) | `organizar.pasta_apos_mover`, `pasta_comum` → `organizar.rs` | `rotulo.Migalha`, `janela._atualizar_migalha`, `_seguir_arquivos_movidos` → `app/src/components/Migalha` | `test_organizar.py` (`test_pasta_apos_mover_*`, `test_pasta_comum`) | pendente |
+| A-13 | Recarregar do disco (`F5`, menu da tabela): relê os arquivos da lista, acha arquivos novos na pasta aberta e remove os que sumiram ou não abrem; pede confirmação se há alterações pendentes | `listar_audios`, `carregar_varios` → `tags.rs` | `janela.recarregar/_ao_recarregar` → ação "Recarregar do disco" | `test_interface.py` (GUI, `test_recarregar_do_disco_traz_o_que_foi_salvo`) | pendente |
+| A-14 | Remover da lista (`Delete`, menu da tabela): tira as faixas selecionadas da lista (não apaga do disco) e descarta as alterações pendentes delas; texto muda para "Remover N da lista" | `Rascunho.descartar(caminhos)` → `rascunho.rs` | `janela.remover_da_lista` → ação da tabela | — | pendente |
+| A-15 | Mostrar na pasta (menu da tabela): abre o Explorer com o arquivo selecionado | — | `janela.mostrar_na_pasta`, `mostrar_no_explorador` → ponte Tauri (revelar arquivo) | — | pendente |
+| A-16 | Formatos aceitos: MP3, FLAC, Ogg (Vorbis, Opus, FLAC no Ogg), M4A e MP4 (ver a seção K para os detalhes de cada um) | `metadata.EXTENSOES_SUPORTADAS` → `tags.rs` | filtro dos seletores de arquivo → diálogo de arquivos | `test_metadata.py` (`test_formatos_suportados`) | pendente |
+
+## B. Tabela de faixas
+
+| Id | Funcionalidade | Núcleo (v2 → v3) | Interface (v2 → v3) | Teste | Status |
+|---|---|---|---|---|---|
+| B-01 | Lista de faixas com seleção de linhas (clique, `Ctrl`, `Shift`, arrastar) e linha inteira com destaque ao passar o mouse | — | `tabela.TabelaFaixas` → `app/src/components/TabelaFaixas` | `test_interface.py` (GUI, parcial) | pendente |
+| B-02 | Colunas de tags: Nº, Título, Artista, Álbum, Artista do álbum, Disco, Ano, Gênero, Compositor, Letrista, Gravadora, Comentário, Letra (só a 1ª linha de comentário e letra), com "—" quando vazio | `metadata.CAMPOS` → `tags.rs` | `tabela.COLUNAS`, `ModeloFaixas.data` → `TabelaFaixas/colunas` | — | pendente |
+| B-03 | Colunas calculadas: Duração (m:ss), Bitrate (kbps, "—" se desconhecido), Arquivo (nome), Pasta (nome da pasta-pai); fonte de números nas colunas Nº, Disco, Ano, Duração e Bitrate | `Faixa.duracao_formatada`, `metadata._bitrate` → `tags.rs` | `tabela.ModeloFaixas` → `TabelaFaixas/colunas` | `test_metadata.py` (`test_bitrate_usa_o_do_mutagen`, `test_bitrate_estimado_pelo_tamanho`, `test_bitrate_sem_duracao_e_zero`) | pendente |
+| B-04 | Coluna Capa (quadradinho cheio se tem capa, tracejado se não; reflete capa pendente) e coluna de estado (ponto na cor de destaque se há alteração pendente); tooltips "Tem capa"/"Sem capa"/"Alterado, não salvo" | `Faixa.tem_capa`, `Rascunho.capa/tem` → `rascunho.rs` | `tabela.DelegadoTabela` → `TabelaFaixas/celulas` | — | pendente |
+| B-05 | Colunas visíveis por padrão: Nº, Título, Artista, Álbum, Ano, Gênero, Duração, Capa, estado; as outras ficam escondidas | — | `tabela.COLUNAS` → `TabelaFaixas/colunas` | — | pendente |
+| B-06 | Menu do cabeçalho (clique direito): mostrar/esconder cada coluna (Título e estado são fixas) e "Restaurar colunas padrão" | — | `tabela._menu_colunas` → `TabelaFaixas/MenuColunas` | — | pendente |
+| B-07 | Reordenar colunas arrastando o cabeçalho e redimensionar; largura inicial por coluna | — | `tabela.restaurar_cabecalho` → `TabelaFaixas` | — | pendente |
+| B-08 | Colunas somem sozinhas, na ordem definida, quando a tabela fica estreita (Título nunca fica menor que 160 px) e voltam quando há espaço; o menu avisa "Sem espaço agora: …"; a preferência salva ignora o que só sumiu por falta de espaço | — | `tabela._ajustar_colunas`, `ORDEM_ESCONDER`, `estado_cabecalho` → `TabelaFaixas/colunas` | — | pendente |
+| B-09 | Ordenar clicando no cabeçalho (números por valor, vazios no fim, texto sem diferenciar maiúsculas); sem coluna ordenada, mantém a ordem de carga | — | `tabela.FiltroFaixas`, `PAPEL_ORDEM` → `TabelaFaixas/ordenacao` | — | pendente |
+| B-10 | Filtro de busca (`Ctrl+F`): por título, artista, álbum ou nome do arquivo, com valores pendentes; botão de limpar; contador "Mostrando X de Y" | — | `janela.busca`, `FiltroFaixas.filterAcceptsRow`, `_atualizar_contagem` → `BarraTopo/Filtro`, `Migalha` | — | pendente |
+| B-11 | Edição direto na célula (duplo clique ou `F2`): valida e vira alteração pendente; valor inválido mostra erro na barra de status e não entra no rascunho; letra não é editável na célula | `validar_valor`, `Rascunho.definir` → `tags.rs`, `rascunho.rs` | `tabela.setData`, `janela._editar_celula` → `TabelaFaixas/EdicaoCelula` | `test_interface.py` (GUI, `test_editar_campo_vira_pendencia_na_tabela`, `test_valor_invalido_nao_entra_no_rascunho`) | pendente |
+| B-12 | Célula alterada e não salva fica com fundo na cor de destaque e texto em cor normal | `Rascunho.tem_campo` → `rascunho.rs` | `tabela.DelegadoTabela` → `TabelaFaixas/celulas` | — | pendente |
+| B-13 | Título vazio mostra o nome do arquivo em itálico, e campos vazios em cor apagada | — | `tabela.ModeloFaixas.data` → `TabelaFaixas/celulas` | — | pendente |
+| B-14 | Selecionar tudo (`Ctrl+A`, menu da tabela) | — | ação "Selecionar tudo" → `TabelaFaixas` | — | pendente |
+| B-15 | Menu de clique direito nas linhas com: Editar célula, Numerar faixas, Renomear pelas tags…, Preencher tags pelo nome…, Organizar em pastas…, Buscar tags online…, Copiar tags, Colar tags, Limpar tags extras…, Mostrar na pasta, Recarregar do disco, Remover da lista, Selecionar tudo; itens desligados quando nada está selecionado | — | `janela._menu_linhas` → `TabelaFaixas/MenuLinhas` | — | pendente |
+| B-16 | Agrupar por álbum (Configurações, desligado por padrão): com mais de um álbum carregado, cabeçalho por álbum ("Álbum — Artista do álbum, ano", com contagem de faixas), faixas por disco e número, "Sem álbum" no fim; clicar no cabeçalho seleciona o álbum; duplo clique no cabeçalho não edita; ao desligar volta a ordenação anterior do usuário | `agrupar.py` (`chave_grupo`, `chave_ordem`, `ordem_faixa`, `mais_de_um_album`, `titulo_cabecalho`) → `agrupar.rs` | `tabela.definir_agrupar`, `_atualizar_grupos` → `TabelaFaixas/Grupos` | `test_agrupar.py` | pendente |
+| B-17 | Densidade da tabela (altura das linhas) e altura do cabeçalho acompanham o tamanho da fonte | — | `tema.altura_linha`, `altura_cabecalho` → `TabelaFaixas` + tema | — | pendente |
+
+## C. Painel de edição de tags
+
+| Id | Funcionalidade | Núcleo (v2 → v3) | Interface (v2 → v3) | Teste | Status |
+|---|---|---|---|---|---|
+| C-01 | Painel com os campos: Título, Artista, Álbum, Artista do álbum, Faixa, Disco, Ano, Gênero, Compositor, Letrista, Gravadora, Comentário e Letra (multilinha) | `metadata.CAMPOS` → `tags.rs` | `editor.PainelEditor` → `app/src/components/PainelEditor` | — | pendente |
+| C-02 | Editar uma ou várias faixas: valor igual em todas é mostrado; valor diferente fica vazio com o texto "‹vários valores›" e só muda se o usuário digitar (apagar o que digitou volta ao estado anterior) | `Rascunho.fotografar/restaurar/definir` → `rascunho.rs` | `editor._ao_editar`, `TEXTO_VARIOS` → `PainelEditor/Campo` | `test_rascunho.py` (`test_varios_valores_restaurar`) | pendente |
+| C-03 | Painel vazio ("Nenhum arquivo selecionado… Use Ctrl, Shift ou arraste o mouse para editar várias") | — | `editor._criar_vazio` → `PainelEditor/Vazio` | — | pendente |
+| C-04 | Cabeçalho do painel: título (ou "N arquivos selecionados"), nome do arquivo, duração e bitrate, tooltip com o caminho; texto de ajuda quando há várias faixas | — | `editor.carregar` → `PainelEditor/Cabecalho` | — | pendente |
+| C-05 | Marca de alteração pendente (ponto na cor de destaque) ao lado do rótulo de cada campo alterado | `Rascunho.tem_campo` → `rascunho.rs` | `editor._atualizar_rotulo` → `PainelEditor/Campo` | — | pendente |
+| C-06 | Validação enquanto digita: borda vermelha, mensagem sob o campo e tooltip (ano `AAAA`/`AAAA-MM-DD` entre 1000 e o ano atual, `atual` vira o ano corrente; faixa/disco `3` ou `3/12`, maiores que 0; gênero não pode ser só número) | `metadata.validar_valor`, `validar_alteracoes` → `tags.rs` | `editor._validar_campo`, `_mostrar_erro` → `PainelEditor/Campo` | `test_metadata.py` (`test_valores_validos`, `test_valores_invalidos`), `test_rascunho.py` (`test_validar`) | pendente |
+| C-07 | Gênero com autocompletar (lista das Configurações + gêneros dos arquivos carregados, busca por trecho, sem diferenciar maiúsculas) | — | `editor.definir_generos`, `QCompleter`, `janela._atualizar_generos` → `PainelEditor/Genero` | — | pendente |
+| C-08 | Vários valores em artista, artista do álbum, gênero, compositor e letrista com `A; B` (gravado como dois valores quando a opção está ligada; ver J-14) | `metadata.dividir_valores`, `CAMPOS_MULTIVALOR` → `tags.rs` | `PainelEditor/Campo` (só digita o texto com `; `) | `test_metadata.py` (`test_multivalor`, `test_multivalor_desligado`, `test_multivalor_ligado_no_id3v23_grava_valores_separados`, `test_multivalor_sobrevive_ao_salvar_outro_campo`, `test_outro_multivalor_nativo`) | pendente |
+| C-09 | `Enter` em um campo de texto salva as alterações pendentes | — | `editor._enter_no_campo` → `PainelEditor/Campo` | — | pendente |
+| C-10 | `Tab` sai dos campos multilinha (Comentário e Letra) em vez de inserir tabulação; `Esc` no painel devolve o foco à tabela | — | `editor.setTabChangesFocus`, `janela._ao_escape` → `PainelEditor` | — | pendente |
+| C-11 | Rodapé do painel: botões "Descartar" e "Salvar" (texto vira "Salvar 1 arquivo" / "Salvar N arquivos"), ativos só com pendências; aparece também no painel vazio quando há pendência | — | `editor._criar_rodape`, `atualizar_rodape` → `PainelEditor/Rodape` | — | pendente |
+| C-12 | Mostrar/esconder o painel (`Ctrl+E`, botão da barra); lembra a escolha entre sessões | — | `janela.alternar_painel` → `Janela/layout` + preferências | — | pendente |
+| C-13 | Divisor arrastável entre painel e tabela (painel de 240 a 560 px); posição salva | — | `janela.divisor` → `Janela/layout` | — | pendente |
+| C-14 | Numerar faixas (`Ctrl+Shift+N`, menu da tabela): 1 a N na ordem da tabela, com total (`3/12`) ou sem, conforme a opção; vira alteração pendente | `Rascunho.definir_por_faixa` → `rascunho.rs` | `janela.numerar_faixas` → ação "Numerar faixas (1 a N)" | — | pendente |
+| C-15 | Copiar tags (`Ctrl+Shift+C`): copia só os campos com o mesmo valor em toda a seleção (e a capa, se a seleção mostrada é a mesma) | `Rascunho.valor` → `rascunho.rs` | `janela.copiar_tags` → ação "Copiar tags" | — | pendente |
+| C-16 | Colar tags (`Ctrl+Shift+V`): aplica as tags (e a capa) copiadas; com várias faixas não cola título, faixa e letra; vira alteração pendente; desligado até haver algo copiado | `Rascunho.definir_por_faixa/definir_capa` → `rascunho.rs` | `janela.colar_tags` → ação "Colar tags" | — | pendente |
+
+## D. Capa
+
+| Id | Funcionalidade | Núcleo (v2 → v3) | Interface (v2 → v3) | Teste | Status |
+|---|---|---|---|---|---|
+| D-01 | Quadro da capa (112 px, cantos arredondados) com a imagem da seleção, "Sem capa" ou "‹várias capas›"; informações de formato, dimensões e tamanho em KB | `metadata.ler_capa` → `capa.rs` | `editor.QuadroCapa`, `_mostrar_capa`, `_descrever_capa` → `PainelEditor/Capa` | — | pendente |
+| D-02 | Só a capa frontal é lida, trocada ou removida; contracapa, foto do artista e outras imagens são mantidas (no M4A a primeira imagem é a capa; no Ogg, o `COVERART` antigo também) | `formatos.escolher_capa`, `metadata.definir_capa/remover_capa` → `capa.rs`, `formatos/*.rs` | — | `test_metadata.py` (`test_trocar_capa_mantem_outras_imagens`, `test_remover_capa_mantem_outras_imagens`, `test_capa_do_tipo_outra`, `test_so_contracapa_nao_conta_como_capa`, `test_outro_capa_definir_trocar_remover`, `test_outro_outras_imagens_ficam`, `test_vorbis_so_contracapa_nao_conta_como_capa`, `test_ogg_coverart_antigo`, `test_flac_sem_vorbis_comment_remove_capa`) | pendente |
+| D-03 | Trocar capa: botão "Trocar capa" (seletor de `.jpg`, `.jpeg`, `.png`) e opção "Escolher imagem…" do menu | `Rascunho.definir_capa` → `rascunho.rs` | `editor._escolher_capa` → `PainelEditor/Capa` | `test_rascunho.py` (`test_desfazer_capa`) | pendente |
+| D-04 | Arrastar uma imagem (arquivo `.jpg`/`.jpeg`/`.png` ou imagem arrastada) sobre o quadro da capa; borda de destaque enquanto arrasta | — | `editor.QuadroCapa.dropEvent`, `imagem_do_mime` → `PainelEditor/Capa` | — | pendente |
+| D-05 | Colar imagem da área de transferência (menu "Colar imagem", desligado se não há imagem; aviso "Não há imagem na área de transferência.") | — | `editor.colar_capa` → `PainelEditor/Capa` (ponte Tauri para a área de transferência) | — | pendente |
+| D-06 | Menu "Mais opções da capa" (botão "…" e clique direito no quadro): Escolher imagem, Colar imagem, Exportar capa, Salvar como cover.jpg na pasta, Remover capa, Manter capa original | — | `editor._menu_capa` → `PainelEditor/MenuCapa` | — | pendente |
+| D-07 | Exportar capa para um arquivo (nome sugerido pelo álbum, sem caracteres inválidos; `.png` ou `.jpg` conforme o tipo) | — | `editor._exportar_capa` → `PainelEditor/MenuCapa` (diálogo de salvar) | — | pendente |
+| D-08 | Salvar a capa mostrada como `cover.jpg`/`cover.png` na pasta de cada arquivo selecionado, perguntando antes de substituir; avisa falhas por pasta | — | `editor._salvar_cover_na_pasta` → `PainelEditor/MenuCapa` | — | pendente |
+| D-09 | Remover capa (vira pendência: "Capa será removida") e "Manter capa original" (desfaz a pendência da capa) | `Rascunho.definir_capa` → `rascunho.rs` | `editor._definir_capa` → `PainelEditor/MenuCapa` | `test_rascunho.py` (`test_desfazer_capa`), `test_metadata.py` (`test_remover_capa_sem_tags_nao_cria_cabecalho`) | pendente |
+| D-10 | Conversão automática: só JPEG e PNG servem de capa em todos os formatos; GIF/BMP/WebP e transparência viram JPEG com fundo branco, olhando os bytes e não a extensão; aviso "Capa convertida para JPEG…" | `garantir_jpeg_ou_png` → `capa.rs` | `editor.garantir_jpeg_ou_png` → `PainelEditor/Capa` | `test_metadata.py` (`test_mp4_capa_que_nao_e_jpeg_nem_png_e_recusada`) | pendente |
+| D-11 | Redução de capas grandes (lado maior que o limite, ou mais de 500 KB, viram JPEG de no máximo N px; padrão 1000 px; aviso "Capa reduzida: …"); opções em Configurações (J-17) | `otimizar_imagem` → `capa.rs` | `editor.otimizar_imagem`, `lado_max_capa` → `PainelEditor/Capa` | `test_janela_opcoes.py` (`test_construir_a_janela_aplica_a_config_da_capa`) | pendente |
+| D-12 | Capa pendente aparece no quadro com a marca de alteração e no texto "Nova capa ●" | `Rascunho.capa` → `rascunho.rs` | `editor._mostrar_capa` → `PainelEditor/Capa` | — | pendente |
+| D-13 | Gravar tags e capa num único save por arquivo; remover só capas/tags sem criar cabeçalho ID3 vazio | `metadata.salvar` → `tags.rs` | — | `test_metadata.py` (`test_um_unico_save_por_arquivo`, `test_outro_um_unico_save`, `test_so_remocoes_nao_cria_cabecalho_vazio`, `test_remover_capa_sem_tags_nao_cria_cabecalho`) | pendente |
+
+## E. Rascunho, salvar, desfazer e segurança
+
+| Id | Funcionalidade | Núcleo (v2 → v3) | Interface (v2 → v3) | Teste | Status |
+|---|---|---|---|---|---|
+| E-01 | Alterações pendentes por arquivo (fonte única de tudo o que não foi gravado): edição no painel, na tabela, numerar, colar, desfazer/refazer e resultado de buscas entram pelos mesmos métodos; valor igual ao do arquivo não fica pendente | `rascunho.Rascunho` → `rascunho.rs` | `janela._ao_mudar_rascunho` → estado global do app | `test_rascunho.py` (`test_definir_e_valor`, `test_valor_igual_ao_do_arquivo_nao_fica_pendente`, `test_gravadora_no_rascunho`) | pendente |
+| E-02 | Salvar (`Ctrl+S`, botão "Salvar · N" da barra, botão do painel): grava todas as pendências em segundo plano com progresso; mostra "N arquivos salvos"; valor inválido bloqueia, seleciona o arquivo e marca o campo | `rascunho.executar_salvamento`, `Rascunho.validar/trabalhos` → `rascunho.rs` | `janela.salvar` → `BarraTopo/Salvar`, `BarraStatus` | `test_interface.py` (GUI, `test_salvar_grava_e_rele_do_disco`), `test_rascunho.py` (`test_validar`) | pendente |
+| E-03 | Descartar alterações (botão "Descartar", `Ctrl+Z` com pendência): joga fora as pendências (e devolve um desfazer/refazer não confirmado à pilha) | `Rascunho.descartar`, `Historico.descartar_pendente` → `rascunho.rs`, `historico.rs` | `janela.descartar` → `PainelEditor/Rodape`, `BarraTopo` | `test_historico.py` (`test_desfazer_com_pendencia_so_descarta`, `test_desfazer_com_desfazer_nao_confirmado_descarta_e_devolve_para_a_pilha`) | pendente |
+| E-04 | Desfazer (`Ctrl+Z`, botão da barra): devolve os valores anteriores (e a capa) como pendência, que só vale ao salvar | `Historico.retirar/preparar`, `Rascunho.aplicar_registros` → `historico.rs`, `rascunho.rs` | `janela.desfazer`, `_preparar_historico` → `BarraTopo`, aviso "revise e clique em Salvar para confirmar (Esc cancela)" | `test_historico.py` (`test_desfazer_volta_para_pendente_e_so_grava_ao_salvar`, `test_desfazer_sem_nada_e_pilha_vazia`, `test_desfazer_que_nao_muda_nada_perde_o_item_e_nao_deixa_pendente`), `test_rascunho.py` (`test_desfazer_tags`) | pendente |
+| E-05 | Refazer (`Ctrl+Y` ou `Ctrl+Shift+Z`, botão da barra), só com rascunho vazio; nova alteração limpa a pilha de refazer | `Historico` → `historico.rs` | `janela.refazer` → `BarraTopo` | `test_historico.py` (`test_refazer_depois_de_desfazer`, `test_refazer_so_com_rascunho_vazio`, `test_nova_alteracao_limpa_a_pilha_de_refazer`, `test_pode_desfazer_e_refazer`) | pendente |
+| E-06 | Gravação com falha parcial: só os arquivos gravados entram no histórico; falha total não mexe nas pilhas; aviso com motivo e nomes | `Historico.registrar_gravacao`, `executar_salvamento` → `historico.rs`, `rascunho.rs` | `janela._ao_salvar` → `BarraStatus` | `test_historico.py` (`test_gravacao_*`), `test_rascunho.py` (`test_falha_de_gravacao_nao_gera_registro`) | pendente |
+| E-07 | `Esc`: limpa a busca; no painel devolve o foco à tabela; cancela um desfazer/refazer ainda não confirmado (não descarta edições normais) | `Historico.pendente` → `historico.rs` | `janela._ao_escape` → `Janela/atalhos` | — | pendente |
+| E-08 | Detecção de arquivo alterado por outro programa antes de salvar: diálogo "Arquivos alterados por outro programa" com Sobrescrever, Recarregar esses (descarta as alterações deles) ou Cancelar; o salvamento nunca grava por cima sem aval | `foi_modificado`, `mtime_atual`, `ArquivoModificado` → `tags.rs`, `rascunho.rs` | `janela._perguntar_modificados` → `Dialogos/ArquivosAlterados` | `test_metadata.py` (`test_foi_modificado`), `test_rascunho.py` (`test_arquivo_modificado_por_fora_nao_e_sobrescrito`) | pendente |
+| E-09 | Falha ao "salvar antes de continuar": diálogo "Alterações não salvas" com Voltar (mantém pendências) ou "Descartar e continuar"; nada se perde sem aviso (fechar, abrir outra pasta, F5, limpar) | `executar_salvamento` → `rascunho.rs` | `janela._perguntar_falhas`, `salvar(sincrono=True)` → `Dialogos/FalhaAoSalvar` | — | pendente |
+| E-10 | Confirmação com pendências ao fechar, abrir outra pasta, recarregar ou limpar extras: Salvar, Descartar ou Cancelar ("Você tem alterações não salvas em N arquivos") | — | `janela._perguntar_salvar`, `_confirmar_pendencias`, `closeEvent` → `Dialogos/AlteracoesNaoSalvas` + evento de fechar do Tauri | `test_interface.py` (GUI, `test_fechar_*`, `test_abrir_outra_pasta_com_pendencia_tambem_pergunta`) | pendente |
+| E-11 | Janela bloqueada durante gravação, movimento e limpeza; não fecha enquanto grava ("Aguarde terminar de gravar os arquivos antes de fechar.") | — | `janela._bloquear`, `_gravando`, `closeEvent` → estado de ocupado global | — | pendente |
+| E-12 | Leitura nunca grava (só `salvar` e `limpar_extras` escrevem em arquivos) | `metadata` → `tags.rs` | — | `test_metadata.py` (`test_ler_nao_grava`, `test_outro_ler_nao_grava`) | pendente |
+| E-13 | Renomear/mover acompanham o rascunho e o histórico (os caminhos novos passam a valer) | `Rascunho.renomear`, `migrar_historico`, `Historico.migrar` → `rascunho.rs`, `historico.rs` | `janela._aplicar_renomeacao` → estado global | `test_rascunho.py` (`test_renomear_*`, `test_migrar_historico`), `test_historico.py` (`test_migrar_atualiza_pilhas_e_pendente`) | pendente |
+| E-14 | Contagem de pendências na barra de status ("● N alterações em M arquivos · não salvo") e botão "Salvar · M"; botões Desfazer/Refazer desligados quando não aplicáveis; tooltip do Desfazer muda para "Descartar alterações não salvas" | `Rascunho.quantidade_campos`, `Historico.pode_desfazer/pode_refazer` → `rascunho.rs`, `historico.rs` | `janela._atualizar_estado` → `BarraStatus`, `BarraTopo` | `test_historico.py` (`test_pode_desfazer_e_refazer`) | pendente |
+| E-15 | Abrir outra pasta limpa o rascunho e o histórico | `Historico.limpar` → `historico.rs` | `janela._ao_carregar` | `test_historico.py` (`test_limpar_ao_abrir_outra_pasta`) | pendente |
+| E-16 | Barra de status: "N arquivos · M selecionados", avisos temporários (6 s) com ✓ (sucesso) ou ! (erro), barra de progresso e o formato/tag das faixas selecionadas (ex.: "MP3 · ID3v2.3", "FLAC · Vorbis comments", "Vários formatos") | `metadata.formato` e `ROTULO_TAGS` → `tags.rs` | `janela._criar_barra_status`, `avisar`, `_atualizar_formato` → `app/src/components/BarraStatus` | `test_metadata.py` (`test_textos_de_formatos`) | pendente |
+
+## F. Renomear, preencher tags, organizar e limpar
+
+| Id | Funcionalidade | Núcleo (v2 → v3) | Interface (v2 → v3) | Teste | Status |
+|---|---|---|---|---|---|
+| F-01 | Renomear arquivos pelas tags (`Ctrl+Shift+R`, menu): padrão como `{tracknumber:02} - {artist} - {title}`, prévia ao vivo "Nome atual → Novo nome" (até 500 linhas), botão "Inserir campo", lista de padrões recentes (até 8) e exemplos; botão "Renomear N arquivos"; usa valores pendentes (aviso no diálogo) | `padroes.nome_pelas_tags`, `planejar_renomeacao`, `executar_renomeacao`, `campos_do_padrao` → `padroes.rs` | `padrao.DialogoRenomear`, `janela.renomear_pelas_tags` → `Dialogos/Renomear` | `test_padroes.py` (`test_nome_pelas_tags`, `test_campos_do_padrao`, `test_renomear_e_trocar_nomes`) | pendente |
+| F-02 | Nomes seguros para o Windows: caracteres inválidos trocados, nomes reservados (`CON`, `NUL`, `COM1`…) e pontos no fim tratados, limite de tamanho, separadores repetidos colapsados; `/` no padrão é recusado | `padroes.sanitizar`, `TAMANHO_MAX_NOME` → `padroes.rs` | — | `test_padroes.py` (`test_sanitizar`, `test_nomes_reservados_e_pontos_no_fim`, `test_barra_no_padrao_e_recusada`, `test_campos_vazios_nao_deixam_separadores_sobrando`) | pendente |
+| F-03 | Detecção de conflitos e "(sem mudança)" na prévia; troca de nomes entre arquivos; só maiúsculas mudam; extensão em minúsculas; destino criado depois da prévia nunca é sobrescrito; nova tentativa se o Windows negar | `padroes.planejar_renomeacao`, `_renomear_com_tentativas` → `padroes.rs` | `Dialogos/Renomear` (linhas com erro em vermelho e esmaecidas) | `test_padroes.py` (`test_planejar_sem_mudanca_e_conflitos`, `test_nome_vazio_e_erro`, `test_so_maiusculas_mudam`, `test_extensao_fica_minuscula`, `test_destino_criado_depois_da_previa_nao_e_sobrescrito`, `test_renomear_tenta_de_novo_se_o_windows_negar`) | pendente |
+| F-04 | Renomear é desfeito/refeito (`Ctrl+Z`/`Ctrl+Y`) movendo de volta na hora, em segundo plano; o que falhar fica na pilha para nova tentativa | `Historico.registrar_renomeacao/concluir_reversao`, `Renomeacao` → `historico.rs` | `janela._reverter_renomeacao` | `test_historico.py` (`test_renomear_*`, `test_desfazer_de_renomeacao_*`) | pendente |
+| F-05 | Preencher tags pelo nome do arquivo (`Ctrl+Shift+T`, menu): padrão como `%artist% - %title%` (apelidos `track`, `disc`, `year`), `%*%` ignora um trecho, `/` usa as pastas acima (`%artist%/%album%/%track% - %title%`); prévia por arquivo, "não segue o padrão" e valores inválidos ignorados | `padroes.tags_pelo_nome` → `padroes.rs` | `padrao.DialogoTagsDoNome`, `janela.tags_pelo_nome` → `Dialogos/TagsDoNome` | `test_padroes.py` (`test_tags_pelo_nome`, `test_tags_pelo_nome_nao_casa`, `test_tags_pelas_pastas`) | pendente |
+| F-06 | Opções "Trocar _ por espaço" e "Preencher só os campos que estão vazios" no diálogo de tags pelo nome; menu "Ignorar trecho %*%" no botão Inserir campo | `padroes.tags_pelo_nome(sublinhado_vira_espaco)` → `padroes.rs` | `padrao.DialogoTagsDoNome` | `test_padroes.py` (`test_tags_pelo_nome_ignorar_e_sublinhado`) | pendente |
+| F-07 | Padrões recentes lembrados (renomear, tags pelo nome e organizar, 8 de cada) e o último padrão usado vira o padrão do próximo uso | — | `padrao.lembrar_padrao`, `janela._lembrar_padrao` → preferências | — | pendente |
+| F-08 | Organizar em pastas (`Ctrl+Shift+O`, menu): padrão `{albumartist}/{album}/{tracknumber:02} - {title}` com `/` separando pastas, prévia "Arquivo atual → Novo local", pasta de destino (campo + "Escolher…", padrão: pasta aberta), tags vazias viram `Unknown Artist`/`Unknown Album`, artista do álbum cai para artista, nome vazio usa o original | `organizar.planejar_organizacao`, `caminho_relativo`, `partes_do_padrao` → `organizar.rs` | `organizar.DialogoOrganizar`, `janela.organizar_em_pastas` → `Dialogos/Organizar` | `test_organizar.py` (`test_caminho_relativo`, `test_tags_vazias_usam_padrao`, `test_artista_do_album_cai_para_artista`, `test_nome_vazio_usa_nome_original`, `test_padrao_invalido`, `test_planejar_e_mover_cria_pastas`, `test_ja_no_lugar`, `test_conflitos`, `test_caracteres_invalidos_nas_pastas`) | pendente |
+| F-09 | "Levar a capa da pasta junto" (`cover`, `folder` ou `front`, `.jpg`/`.jpeg`/`.png`) só quando a pasta inteira vai para o mesmo destino; capas com mesmo alvo não duplicam | `organizar._planejar_capas` → `organizar.rs` | `Dialogos/Organizar` (opção ligada por padrão) | `test_organizar.py` (`test_capa_vai_junto_so_se_a_pasta_fica_sem_faixas`, `test_capas_com_mesmo_alvo_nao_duplicam`, `test_organizar_levando_capa_e_removendo_vazias_e_desfazer`) | pendente |
+| F-10 | "Remover as pastas que ficarem vazias" (nunca a pasta aberta nem a de destino, nunca sobe além da origem, nunca pastas com arquivos) | `organizar.remover_pastas_vazias` → `organizar.rs` | `Dialogos/Organizar` | `test_organizar.py` (`test_nao_remove_pasta_com_arquivos_nem_o_destino`, `test_remover_pastas_vazias_para_no_limite`, `test_vazias_*`, `test_pasta_aberta_nunca_e_removida`, `test_nao_deixa_pastas_vazias_no_destino_apos_falha`) | pendente |
+| F-11 | Mover entre unidades de disco sem deixar temporário nem duplicado; troca de lugar entre dois arquivos; movimento em segundo plano com cursor de espera e progresso | `organizar.executar_movimentos`, `_mover_entre_unidades` → `organizar.rs` | `janela._mover_em_segundo_plano` → `Janela` (estado de ocupado) | `test_organizar.py` (`test_entre_unidades_nao_deixa_temporario_nem_duplicado`, `test_troca_de_lugar_entre_dois_arquivos`) | pendente |
+| F-12 | Organizar é desfeito e refeito (`Ctrl+Z`/`Ctrl+Y`): move de volta, remove as pastas que o Tagger criou e ficaram vazias; movimento interrompido no meio registra o que já saiu | `Historico`, `organizar.executar_organizacao`, `criadas` → `historico.rs`, `organizar.rs` | `janela._reverter_renomeacao`, `_ao_mover` | `test_organizar.py` (`test_criadas_permite_limpar_destino_ao_desfazer`), `test_historico.py` (`test_movimento_interrompido_*`) | pendente |
+| F-13 | Resumo após organizar: "N arquivo(s) movido(s) para …", tabela "Era → Agora está em" (ou "Motivo" para falhas) e botão "Abrir pasta"; lista e migalha seguem os arquivos | `organizar.resumo_movimentos`, `resumo_falhas`, `pastas_de_destino` → `organizar.rs` | `organizar.DialogoResumoOrganizar` → `Dialogos/ResumoOrganizar` | `test_organizar.py` (`test_resumo_movimentos_relativo_a_base`, `test_resumo_falhas`, `test_pastas_de_destino_sem_repetir`) | pendente |
+| F-14 | Limpar tags extras (menu da tabela): analisa a seleção e mostra o que existe, com nomes legíveis (frames ID3, chaves Vorbis, átomos MP4 e famílias como ReplayGain e MusicBrainz) e contagem por tipo | `metadata.analisar_extras` → `tags.rs` | `limpeza.DialogoLimpeza`, `nome_extra` → `Dialogos/LimparExtras` | `test_metadata.py` (`test_analisar_e_limpar_extras`, `test_outro_analisar_e_limpar_extras`) | pendente |
+| F-15 | Opções da limpeza: remover ID3v1 (só MP3), remover frames ID3 não reconhecidos (só MP3) e remover tudo o que o Tagger não mostra (todos os formatos); campos do editor e capa sempre mantidos; em FLAC, Ogg e M4A só a última opção vale; átomos técnicos do M4A não são tocados | `metadata.limpar_extras`, `tem_id3v1` → `tags.rs` | `Dialogos/LimparExtras` | `test_metadata.py` (`test_limpar_extras_usa_as_opcoes_no_save`, `test_mp4_limpeza_nao_toca_atomos_tecnicos`, `test_outro_id3v1_nunca_corta_o_arquivo`) | pendente |
+| F-16 | A limpeza grava na hora e não pode ser desfeita; se há pendências nos arquivos escolhidos, pede para salvar ou descartar antes; roda em segundo plano com progresso; resultado "N arquivo(s) limpos" ou "Nada para limpar" | `limpar_extras` → `tags.rs` | `janela.limpar_tags_extras`/`Limpador` → `Dialogos/LimparExtras` | `test_metadata.py` (`test_limpar_extras_usa_as_opcoes_no_save`) | pendente |
+
+## G. Busca online
+
+| Id | Funcionalidade | Núcleo (v2 → v3) | Interface (v2 → v3) | Teste | Status |
+|---|---|---|---|---|---|
+| G-01 | Janela "Buscar tags online" (botão "Buscar online", `Ctrl+Shift+M`, menu da tabela): campos Artista, Álbum e Título já preenchidos pela seleção, `Enter` busca, lista de resultados, prévia "Arquivo/Campo/Antes/Depois", aviso quando nada casa ou nada muda | `busca.analisar`, `montar_alteracoes` → `busca/musicbrainz.rs` | `busca_online.DialogoBuscaOnline`, `janela.buscar_tags_online` → `Dialogos/BuscaOnline` | `test_busca.py` (`test_dialogo_fluxo_completo`) | pendente |
+| G-02 | Fonte MusicBrainz: busca de releases, detalhes, casamento das faixas por título e número, vários discos, gêneros do release group quando o release não traz | `busca.ClienteMusicBrainz`, `casar_faixas` → `busca/musicbrainz.rs` | `FonteMusicBrainz` → `Dialogos/BuscaOnline` | `test_busca.py` (`test_buscar_releases_monta_candidatos_e_user_agent`, `test_detalhar_release`, `test_montar_alteracoes_casa_por_titulo_e_numero`, `test_titulos_repetidos_em_varios_discos_sao_1_para_1`, `test_varios_discos_preenche_discnumber`, `test_generos_vem_do_release_group_quando_o_release_nao_traz`, `test_falha_no_release_group_nao_derruba_o_detalhe`) | pendente |
+| G-03 | Fonte Discogs: tags, ano, faixa/disco, artista do álbum e gravadora; posições de vinil `A1`/`B2` e CD viram faixa e disco; casamento por nome, posição e ordem; resultado entra no rascunho | `discogs.ClienteDiscogs`, `interpretar_posicao`, `numerar` → `busca/discogs.rs` | `FonteDiscogs` → `Dialogos/BuscaOnline` | `test_online.py` (`test_interpretar_posicao`, `test_numerar_vinil_cd_e_numeros`, `test_detalhar_release_vinil`, `test_casamento_discogs_por_nome_posicao_e_ordem`, `test_resultado_discogs_entra_no_rascunho`, `test_gravadora_entra_nas_alteracoes`) | pendente |
+| G-04 | Escolha da fonte (MusicBrainz/Discogs) por botões; serviço sem credencial fica desligado com a dica de como configurar; trocar de fonte limpa a lista | `credenciais.estado_servicos`, `DICAS` → `credenciais.rs` | `DialogoBuscaOnline.botoes_fonte` → `Dialogos/BuscaOnline` | `test_busca_online.py` (`test_servico_sem_credencial_fica_desabilitado_com_dica`, `test_estados_da_janela_principal_desabilitam_com_a_dica_dela`, `test_criar_fontes_com_e_sem_credencial`) | pendente |
+| G-05 | "Se o MusicBrainz não achar, buscar no Discogs" (alternativa automática, ligada quando há Discogs; aviso de qual serviço respondeu) | — | `DialogoBuscaOnline.ck_alternativa` | `test_busca_online.py` (`test_musicbrainz_sem_resultado_usa_o_discogs`) | pendente |
+| G-06 | "Baixar a capa" (só MusicBrainz, ligada por padrão): capa do Cover Art Archive só das faixas casadas; capas do Discogs nunca são baixadas; erro de capa vira aviso sem cancelar as tags | `busca.baixar_capa` → `busca/musicbrainz.rs` | `DialogoBuscaOnline.ck_capa`, `janela.buscar_tags_online` (capa vira JPEG/PNG) | `test_busca.py` (`test_baixar_capa`, `test_capa_sem_tipo_usa_assinatura_e_404_vira_none`, `test_analisar_separa_sem_par_e_capa_so_das_casadas`, `test_resultado_acao_capa`, `test_erro_do_caa_nao_cita_musicbrainz_e_http_exception`) | pendente |
+| G-07 | "Aplicar ao rascunho" (ou duplo clique no resultado): nada é gravado até salvar; mensagem com quantos arquivos mudaram e quais ficaram sem correspondência | `Resultado`, `Rascunho.definir_por_faixa` → `busca/mod.rs`, `rascunho.rs` | `janela.buscar_tags_online` → `Dialogos/BuscaOnline` | `test_busca.py` (`test_dialogo_fluxo_completo`, `test_valor_usa_edicao_pendente`) | pendente |
+| G-08 | Rede fora da thread da interface; cancelar com consulta em andamento não trava nem aceita; trocar credenciais ou token com a janela aberta recria a fonte e descarta resultados velhos | `busca`, `discogs` (assíncrono) → `busca/` | `DialogoBuscaOnline.done`, `atualizar_servicos` | `test_busca.py` (`test_cancelar_com_thread_rodando_nao_trava_nem_aceita`), `test_busca_online.py` (`test_servicos_mudaram_com_a_janela_aberta`, `test_trocar_o_token_com_a_janela_aberta_usa_o_novo`, `test_credencial_muda_com_consulta_rodando_sem_quebrar`, `test_duas_buscas_seguidas_nao_reaproveitam_a_previa`) | pendente |
+| G-09 | Atribuição visível ao lado dos dados ("Data provided by Discogs." com link para o release; "Dados do MusicBrainz · capas do Cover Art Archive."), links só https de domínios do serviço (senão só texto) e link "Sobre" no diálogo | `discogs.ATRIBUICAO`, `online.url_segura` → `busca/discogs.rs`, `busca/rede.rs` | `DialogoBuscaOnline.atribuicao`, `lnk_sobre` | `test_atribuicao.py`, `test_busca_online.py` (`test_link_inseguro_vira_texto`), `test_online.py` (`test_url_segura`, `test_links_falsos_do_json_trocados_pelos_montados`) | pendente |
+| G-10 | Limites e regras dos serviços: MusicBrainz com User-Agent identificado e no máximo 1 requisição por segundo; Discogs com 60 por minuto, espera no 429 (`Retry-After`, até 3 tentativas), cache só em memória (teto de 6 h); respostas inválidas viram erro amigável; respostas grandes limitadas | `busca.Limitador`, `discogs.LIMITADOR`, `online.LimitadorJanela`, `Cache` → `busca/rede.rs` | — | `test_rede.py`, `test_busca.py` (`test_limite_de_uma_requisicao_por_segundo`, `test_erros_de_rede_viram_erro_busca`, `test_resposta_que_nao_e_json`), `test_online.py` (`test_respeita_cabecalhos_de_limite_e_espera_no_429`, `test_429_*`, `test_cache_*`, `test_json_estranho_*`) | pendente |
+| G-11 | Credenciais fora de logs, erros, URLs e diálogos: ordem Configurações > variável de ambiente > `chaves.json` embutido; token do Discogs só no cabeçalho `Authorization` e nunca segue redirecionamento para outro host, outra porta ou http | `credenciais`, `online.abrir_sem_vazar`, `ocultar_credenciais` → `credenciais.rs`, `busca/rede.rs` | — | `test_credenciais.py`, `test_seguranca.py`, `test_online.py` (`test_redirect_*`, `test_authorization_do_discogs_nunca_segue_redirect`, `test_sem_credencial_discogs_nao_faz_requisicao`) | pendente |
+| G-12 | Sem credencial, a busca do Discogs fica desativada (nunca faz requisição) e o MusicBrainz continua disponível | `credenciais.estado_servicos` → `credenciais.rs` | `Dialogos/BuscaOnline` | `test_online.py` (`test_sem_credencial_discogs_nao_faz_requisicao`, `test_buscar_releases_discogs_credencial_so_no_cabecalho`), `test_busca_online.py` (`test_erro_mostrado_sem_credencial`) | pendente |
+
+## H. Atalhos de teclado
+
+Cada atalho da v2 (`janela._criar_acoes`, `tabela`, `vazio`, `editor`). Os atalhos de contexto de tabela só valem com a tabela focada.
+
+| Id | Atalho | Ação | Núcleo | Interface (v2 → v3) | Teste | Status |
+|---|---|---|---|---|---|---|
+| H-01 | `Ctrl+O` | Abrir pasta | ver A-01 | `Janela/atalhos` | — | pendente |
+| H-02 | `Ctrl+S` | Salvar todas as alterações pendentes | ver E-02 | `Janela/atalhos` | — | pendente |
+| H-03 | `Ctrl+Z` | Desfazer (com pendência, descarta) | ver E-03, E-04 | `Janela/atalhos` | `test_historico.py` | pendente |
+| H-04 | `Ctrl+Y`, `Ctrl+Shift+Z` | Refazer | ver E-05 | `Janela/atalhos` | `test_historico.py` | pendente |
+| H-05 | `Ctrl+F` | Focar a busca e selecionar o texto | — | `Janela/atalhos`, `BarraTopo/Filtro` | — | pendente |
+| H-06 | `Ctrl+,` | Abrir Configurações | — | `Janela/atalhos` | — | pendente |
+| H-07 | `Ctrl+E` | Mostrar/esconder o editor | ver C-12 | `Janela/atalhos` | — | pendente |
+| H-08 | `Esc` | Limpar busca, sair do painel ou cancelar desfazer pendente | ver E-07 | `Janela/atalhos` | — | pendente |
+| H-09 | `F1` | Sobre o Tagger | ver L-04 | `Janela/atalhos` | `test_atribuicao.py` (`test_f1_e_o_atalho_do_sobre_e_o_dialogo_mostra_o_aviso`) | pendente |
+| H-10 | `F5` | Recarregar do disco | ver A-13 | `Janela/atalhos` | `test_interface.py` | pendente |
+| H-11 | `Ctrl+Shift+N` | Numerar faixas | ver C-14 | `Janela/atalhos` | — | pendente |
+| H-12 | `Ctrl+Shift+R` | Renomear pelas tags | ver F-01 | `Janela/atalhos` | — | pendente |
+| H-13 | `Ctrl+Shift+T` | Preencher tags pelo nome | ver F-05 | `Janela/atalhos` | — | pendente |
+| H-14 | `Ctrl+Shift+O` | Organizar em pastas | ver F-08 | `Janela/atalhos` | — | pendente |
+| H-15 | `Ctrl+Shift+M` | Buscar tags online | ver G-01 | `Janela/atalhos` | — | pendente |
+| H-16 | `Ctrl+Shift+C` | Copiar tags | ver C-15 | `Janela/atalhos` | — | pendente |
+| H-17 | `Ctrl+Shift+V` | Colar tags | ver C-16 | `Janela/atalhos` | — | pendente |
+| H-18 | `Delete` (na tabela) | Remover da lista | ver A-14 | `TabelaFaixas` | — | pendente |
+| H-19 | `F2` (na tabela) | Editar a célula atual | ver B-11 | `TabelaFaixas` | — | pendente |
+| H-20 | `Ctrl+A` (na tabela) | Selecionar tudo | ver B-14 | `TabelaFaixas` | — | pendente |
+| H-21 | `Enter` (em um campo do painel) | Salvar pendências | ver C-09 | `PainelEditor/Campo` | — | pendente |
+| H-22 | `Enter`/`Espaço`/`Delete` (numa pasta recente) | Abrir / abrir / tirar da lista | ver A-10 | `TelaVazia/Recentes` | — | pendente |
+| H-23 | `Enter` (nos campos da busca online) | Buscar | ver G-01 | `Dialogos/BuscaOnline` | — | pendente |
+
+## I. Janela, barra superior e estado
+
+| Id | Funcionalidade | Núcleo (v2 → v3) | Interface (v2 → v3) | Teste | Status |
+|---|---|---|---|---|---|
+| I-01 | Barra superior: logo e nome, "Abrir pasta", "Adicionar arquivos", "Buscar online", mostrar/esconder editor, Desfazer, Refazer, filtro, Configurações, alternar tema claro/escuro, "Salvar · N" (tooltips com o atalho; nomes acessíveis) | — | `janela._criar_barra_topo` → `app/src/components/BarraTopo` | — | pendente |
+| I-02 | Alternar tema claro/escuro com um clique (botão sol/lua da barra), lembrando a escolha | — | `janela.alternar_tema` → `BarraTopo` + tema | — | pendente |
+| I-03 | Barra compacta em janelas estreitas (menos de 1100 px): botões "Abrir pasta", "Adicionar arquivos" e "Buscar online" ficam só com ícone, o nome do app some, o filtro encolhe e "Salvar · N" mantém a largura | — | `janela._ajustar_barra_topo`, `_fixar_largura_salvar` → `BarraTopo` (responsivo) | — | pendente |
+| I-04 | Janela redimensionável até 600×320; a tela inicial rola em janelas baixas | — | `janela.setMinimumSize`, `QScrollArea` → `Janela/layout` | — | pendente |
+| I-05 | Geometria da janela lembrada e encaixada na tela atual (monitor ausente ou menor); 1ª execução ocupa ~85 % da tela (até 1440×900) centralizada | — | `janela._geometria_inicial`, `_encaixar_na_tela`, `closeEvent` → `app/src-tauri` (janela) + preferências | — | pendente |
+| I-06 | Estado salvo ao fechar: geometria, posição do divisor, colunas (ordem, largura, visibilidade) e painel visível; reaplicados ao abrir | — | `janela.closeEvent`, `__init__` → preferências | `test_qsettings.py` (isolamento do armazenamento) | pendente |
+| I-07 | Ícone próprio na barra de tarefas do Windows (AppUserModelID) e ícone do app que acompanha a cor de destaque; barra de título escura/clara conforme o tema | — | `janela.main`, `icone_app`, `barra_de_titulo_escura` → `app/src-tauri` (ícone, tema da janela) | — | pendente |
+| I-08 | Ícones desenhados (pasta, arquivo+, globo, painel, desfazer, refazer, config, sol/lua, salvar, busca, música, upload, fechar, mais) na cor do tema e na escala do monitor | — | `icones.icone/pixmap` → `app/src/components/icones` | — | pendente |
+| I-09 | Foco inicial na tabela ao abrir (nenhum botão da barra com anel de foco); botões com nome acessível; tooltips | — | `janela.showEvent`, `setAccessibleName` → `Janela` (acessibilidade) | — | pendente |
+| I-10 | Menus e tooltips sem moldura nativa, com o visual do tema | — | `janela.FiltroJanelas` → CSS do app | — | pendente |
+
+## J. Configurações
+
+Janela `Ctrl+,` com 4 abas. Cada mudança é aplicada na hora (prévia ao vivo, ~150 ms depois de parar de mexer); **Cancelar** volta tudo ao que estava, **OK** salva.
+
+| Id | Funcionalidade | Núcleo (v2 → v3) | Interface (v2 → v3) | Teste | Status |
+|---|---|---|---|---|---|
+| J-01 | Prévia ao vivo, Cancelar desfaz, OK salva; valores lidos com conversão de tipo e queda para o padrão se inválidos | `config.PADROES`, `carregar_config`, `salvar_config` → `config.rs` | `configuracoes.DialogoConfiguracoes` → `app/src/components/Configuracoes` | `test_configuracoes_servicos.py` (`test_previa_ao_vivo_nunca_leva_a_chave`, `test_cancelar_nao_deixa_a_chave_na_sessao`, `test_ok_aplica_salva_e_avisa`) | pendente |
+| J-02 | Aba Aparência — Modo: Escuro ou Claro (padrão escuro) | — | `rb_escuro/rb_claro` → `Configuracoes/Aparencia` | — | pendente |
+| J-03 | Aba Aparência — Tema escuro e Tema claro (listas; ver seção M) | `tema.TEMAS` → tema do app | `cb_tema_escuro/cb_tema_claro` | — | pendente |
+| J-04 | Aba Aparência — Cor de destaque: 6 cores (Menta, Azul, Laranja, Lilás, Rosa, Amarelo), "Do tema" (usa a cor do tema, padrão) e "Personalizada…" (seletor de cor) | `tema.acento_efetivo` | `Configuracoes/Aparencia` | — | pendente |
+| J-05 | Aba Aparência — Fonte da interface e Fonte dos números (qualquer família instalada ou "Automática"); fontes preferidas: Geist, Segoe UI Variable Text, Segoe UI, SF Pro Text, Helvetica Neue, Noto Sans, DejaVu Sans / Geist Mono, Cascadia Mono, Consolas, SF Mono, Menlo, DejaVu Sans Mono; Geist embutida | `tema.escolher_fontes` | `Configuracoes/Aparencia`; fontes em `app/src/assets` | — | pendente |
+| J-06 | Aba Aparência — Tamanho da fonte (11 a 18 px, padrão 13) | — | `sp_tamanho` | — | pendente |
+| J-07 | Aba Aparência — Altura das linhas: Compacta (padrão), Confortável, Espaçosa | `tema.ALTURA_LINHA` | `cb_densidade` | — | pendente |
+| J-08 | Aba Comportamento — "Incluir subpastas ao abrir uma pasta" (ligada) | ver A-05 | `ck_subpastas` | — | pendente |
+| J-09 | Aba Comportamento — "Reabrir a última pasta ao iniciar o Tagger" (desligada) | ver A-11 | `ck_reabrir` | — | pendente |
+| J-10 | Aba Comportamento — "Incluir o total ao numerar faixas" (ligada: `3/12` em vez de `3`) | ver C-14 | `ck_total` | — | pendente |
+| J-11 | Aba Comportamento — "Agrupar a lista por álbum" (desligada) | ver B-16 | `ck_agrupar` | `test_agrupar.py` | pendente |
+| J-12 | Aba Comportamento — "Avisar quando houver uma versão nova do Tagger" (ligada; consulta o GitHub no máximo uma vez por dia) | ver L-01 | `ck_atualizacao` | `test_interface_atualizacao.py` (`test_consulta_so_acontece_uma_vez_por_dia_e_se_ligada`) | pendente |
+| J-13 | Aba Tags — Versão do ID3 ao salvar (só MP3): ID3v2.3 (padrão, mais compatível) ou ID3v2.4 | `OpcoesGravacao.versao_id3` → `tags.rs` | `rb_v23/rb_v24` | `test_metadata.py` (`test_id3v23_por_padrao`, `test_id3v24`, `test_versao_id3_vale_em_salvar_varios_e_definir_capa`), `test_janela_opcoes.py` | pendente |
+| J-14 | Aba Tags — "Gravar `A; B` como vários valores" (ligada; vale para todos os formatos) | `OpcoesGravacao.multivalor` → `tags.rs` | `ck_multivalor` | `test_metadata.py` (`test_multivalor*`, `test_dividir_valores_com_e_sem_multivalor`), `test_janela_opcoes.py` | pendente |
+| J-15 | Aba Tags — "Remover a tag ID3v1 antiga dos MP3 salvos" (desligada; só MP3) | `OpcoesGravacao.remover_id3v1` → `tags.rs` | `ck_id3v1` | `test_metadata.py` (`test_remover_id3v1_ao_salvar`), `test_janela_opcoes.py` (`test_salvar_usa_as_opcoes_da_config`) | pendente |
+| J-16 | As opções de gravação chegam ao núcleo a cada gravação (salvar e limpar extras) como parâmetro, sem estado global | `OpcoesGravacao` → `tags.rs` | `janela.opcoes_gravacao` | `test_janela_opcoes.py`, `test_rascunho.py` (`test_salvamento_usa_as_opcoes_de_gravacao`) | pendente |
+| J-17 | Aba Tags — Capa: "Reduzir capas grandes ao inserir, para no máximo N px" (ligada; 300 a 3000 px, passo 100, padrão 1000) | ver D-11 | `ck_otimizar`, `sp_lado_capa` | `test_janela_opcoes.py` (`test_construir_a_janela_aplica_a_config_da_capa`) | pendente |
+| J-18 | Aba Tags — Gêneros sugeridos no autocompletar (um por linha; lista inicial de 40 gêneros) | `config.PADROES["generos"]` → `config.rs` | `tx_generos` | — | pendente |
+| J-19 | Aba Serviços online — Token pessoal do Discogs (opcional): campo oculto como senha, botão Mostrar/Ocultar, "Em branco = chave do Tagger"; guia "Como gerar a minha chave?" com o passo a passo e link | `credenciais.CHAVES_CONFIG`, `discogs_authorization` → `credenciais.rs` | `_aba_servicos`, `_campo_senha`, `TUTORIAL_CHAVES` | `test_configuracoes_servicos.py`, `test_credenciais.py` | pendente |
+| J-20 | A chave colada só chega à janela principal no OK (a prévia ao vivo e o Cancelar nunca a deixam na sessão) e as buscas abertas recebem o novo estado dos serviços | `credenciais` → `credenciais.rs` | `previa`, `credenciais_aceitas`, `servicos_mudaram` | `test_configuracoes_servicos.py` | pendente |
+| J-21 | "Restaurar padrões" (aparência, comportamento e tags; **não** apaga os padrões de nome recentes nem a chave colada) | `config.PADROES` → `config.rs` | `configuracoes._restaurar_padroes` | — | pendente |
+| J-22 | Botão "Sobre o Tagger" dentro das Configurações | ver L-04 | `configuracoes._sobre` | — | pendente |
+| J-23 | Preferências salvas entre sessões (v2: `QSettings`, registro do Windows) e padrões de nome com recentes: `padrao_renomear`, `padrao_tags`, `padrao_organizar`, `recentes_*` | `config.rs` | preferências na ponte Tauri | `test_qsettings.py` | pendente |
+| J-24 | Chave antiga do Last.fm apagada das preferências ao iniciar (limpeza de migração da v2.2.1/2.3.0) | `config.CHAVES_ANTIGAS` → `config.rs` | — | `test_atribuicao.py` (`test_carregar_config_remove_a_chave_antiga_do_lastfm`) | pendente |
+
+## K. Formatos e tags
+
+| Id | Funcionalidade | Núcleo (v2 → v3) | Interface | Teste | Status |
+|---|---|---|---|---|---|
+| K-01 | MP3 (ID3): leitura e gravação dos 13 campos, ID3v2.3 por padrão e ID3v2.4 opcional; remoção de campo (valor vazio) e `‹vários›` ignorado ao salvar | `metadata` (ID3) → `formatos/id3.rs` | — | `test_metadata.py` (`test_salvar_e_reler`, `test_valor_vazio_remove_e_varios_ignora`, `test_arquivo_sem_tags`, `test_id3v23_por_padrao`, `test_id3v24`) | pendente |
+| K-02 | FLAC e Ogg (Vorbis, Opus, FLAC no Ogg) por Vorbis comments, mesmos campos; nomes alternativos de chave lidos; `LABEL`/`ORGANIZATION` | `formatos/vorbis.py` → `formatos/vorbis.rs` | — | `test_metadata.py` (`test_outro_*`, `test_vorbis_*`, `test_ogg_opus`, `test_ogg_coverart_antigo`) | pendente |
+| K-03 | M4A/MP4 por átomos do iTunes, mesmos campos; gravadora como átomo livre `LABEL` | `formatos/mp4.py` → `formatos/mp4.rs` | — | `test_metadata.py` (`test_outro_*`, `test_gravadora_outro_gravar_e_apagar`, `test_mp4_*`) | pendente |
+| K-04 | Faixa e disco com total (`3/12`) em todos os formatos; número sem barra mantém o total existente (Vorbis) | tags → `tags.rs` | — | `test_metadata.py` (`test_outro_faixa_sem_total`, `test_vorbis_numero_sem_barra_mantem_total`) | pendente |
+| K-05 | Comentário e letra: só o primeiro (ou o do Tagger) é trocado; descrição de outro programa preservada; comentário legado em `TXXX` lido; letra (`USLT`) | tags → `tags.rs` | — | `test_metadata.py` (`test_comentario_legado_txxx`, `test_comentario_com_descricao_e_preservado`, `test_letra_com_outra_descricao_e_preservada`, `test_outro_so_o_primeiro_comentario_ou_letra_e_trocado`) | pendente |
+| K-06 | Gênero numérico do ID3v1 lido como nome; gênero multivalor que sobrevive a gravar outro campo | tags → `formatos/id3.rs` | — | `test_metadata.py` (`test_genero_id3v1_numerico`, `test_multivalor_sobrevive_ao_salvar_outro_campo`) | pendente |
+| K-07 | Gravadora (`TPUB`, `ORGANIZATION`/`LABEL`, átomo `LABEL`) em todos os formatos, com prioridade de `ORGANIZATION` sobre `LABEL` na leitura | tags → `tags.rs` | — | `test_metadata.py` (`test_gravadora_mp3`, `test_gravadora_outro_gravar_e_apagar`, `test_gravadora_vorbis_le_label`, `test_gravadora_vorbis_organization_tem_prioridade`) | pendente |
+| K-08 | Valores comuns de uma seleção para o painel (campos iguais ou "vários") | `metadata.valores_comuns` → `tags.rs` | — | `test_metadata.py` (`test_valores_comuns`) | pendente |
+| K-09 | Duração e bitrate lidos (bitrate estimado pelo tamanho quando o leitor não informa) | `metadata._bitrate` → `tags.rs` | — | `test_metadata.py` (`test_bitrate_*`) | pendente |
+| K-10 | Comparação byte a byte com a v2 nos mesmos arquivos (critério de aceite do núcleo, ADR 0001) | todos | — | — (script de comparação previsto na ADR) | pendente |
+
+## L. Avisos, erros, sobre e versão
+
+| Id | Funcionalidade | Núcleo (v2 → v3) | Interface (v2 → v3) | Teste | Status |
+|---|---|---|---|---|---|
+| L-01 | Aviso de nova versão: ao abrir, consulta a última Release do GitHub no máximo uma vez por dia (só se a opção estiver ligada); falha de rede é silenciosa; ignora pré-lançamento e rascunho; compara versões por partes numéricas; resposta grande ou estranha é descartada; sem credenciais | `atualizacao.py` → `atualizacao.rs` | `janela.verificar_atualizacao`, `_avisar_nova_versao` → `Dialogos/NovaVersao` | `test_atualizacao.py`, `test_interface_atualizacao.py` | pendente |
+| L-02 | Diálogo "Nova versão do Tagger": "Abrir a página da versão" (só link do GitHub por https) ou "Agora não"; nunca baixa nem instala; não aparece se a janela fechou durante a consulta (e fechar nunca espera a consulta) | `atualizacao._url_da_release` → `atualizacao.rs` | `Dialogos/NovaVersao` | `test_atualizacao.py` (`test_link_fora_do_github_cai_na_pagina_de_releases`), `test_interface_atualizacao.py` (`test_versao_nova_mostra_o_aviso_com_link`, `test_fechar_com_consulta_pendente_nao_espera_nem_quebra`) | pendente |
+| L-03 | Log `tagger.log` na pasta de dados do usuário (até ~1 MB e 2 arquivos antigos), com versões do app e das bibliotecas na primeira linha, sem nunca registrar credenciais | `FormatadorSemCredenciais` → `log.rs` | `erros.configurar_log` → `app/src-tauri` (pasta de dados) | `test_seguranca.py`, `test_credenciais.py` | pendente |
+| L-04 | Sobre o Tagger (`F1`, botão nas Configurações, link na busca online): versão, fontes dos dados (MusicBrainz, Cover Art Archive, Discogs) com links e o aviso do Discogs | `discogs.AVISO_SOBRE`, `sobre.texto_sobre` → `busca/discogs.rs` | `sobre.DialogoSobre` → `Dialogos/Sobre` | `test_atribuicao.py` (`test_sobre_tem_o_aviso_completo_do_discogs`, `test_f1_e_o_atalho_do_sobre_e_o_dialogo_mostra_o_aviso`), `test_busca_online.py` (`test_sobre_tem_o_aviso_do_discogs`) | pendente |
+| L-05 | Erro inesperado (na janela ou em qualquer thread) vai para o log e abre o diálogo "Erro inesperado" com detalhes e o botão "Abrir pasta do log"; o app continua aberto e as alterações pendentes são mantidas; vários erros em cascata não empilham janelas | — | `erros.instalar_tratamento_de_erros` → `Dialogos/ErroInesperado` + ganchos de pânico do Rust e erro do front | — | pendente |
+| L-06 | Versão do app em um só lugar (`tagger/__version__`), usada pela janela, pelo User-Agent do MusicBrainz e pelo build | — | `Sobre`, `BarraTopo` | — | pendente |
+
+## M. Aparência e temas
+
+| Id | Funcionalidade | Núcleo | Interface (v2 → v3) | Teste | Status |
+|---|---|---|---|---|---|
+| M-01 | Temas escuros (13): Grafite (padrão), Meia-noite, Alto contraste, Dracula, Nord, Gruvbox Dark, Catppuccin Mocha, Tokyo Night, One Dark, Solarized Dark, Monokai, GitHub Dark, Rosé Pine — cada um com sua cor de destaque | — | `tema.TEMAS`, `paleta` → `app/src/tema` (variáveis CSS) | — | pendente |
+| M-02 | Temas claros (7): Claro (padrão), Sépia, Catppuccin Latte, Gruvbox Light, Solarized Light, GitHub Light, Rosé Pine Dawn — cada um com sua cor de destaque | — | `tema.TEMAS`, `paleta` → `app/src/tema` | — | pendente |
+| M-03 | Cor de destaque derivada (hover, seleção, texto sobre a cor com contraste mínimo 4,5, estado "do tema") aplicada em botões primários, pontos de pendência, seleção da tabela e ícone do app | `tema.acento_efetivo`, `contraste`, `_texto_sobre` | `app/src/tema` | — | pendente |
+| M-04 | Folha de estilo única com o tema aplicado a botões (primário, fantasma, amostra), campos, abas, listas, tabelas, menus, barras de rolagem, status e diálogos; erro com borda vermelha | — | `tema.folha_de_estilo` → CSS do app | — | pendente |
+| M-05 | Fontes e tamanho aplicados à interface inteira (incluindo menus e diálogos); números em fonte monoespaçada | `tema.escolher_fontes` | `app/src/tema` | — | pendente |
+
+## N. Linha de comando (v1.0, `python -m tagger.cli`)
+
+| Id | Funcionalidade | Núcleo (v2 → v3) | Interface | Teste | Status |
+|---|---|---|---|---|---|
+| N-01 | Menu "Edição individual / Bulk edit / Sair" no terminal, com título da janela e versão | `cli.py` → (decisão pendente: ver "Dúvidas") | terminal | — | pendente |
+| N-02 | Edição individual: escolher arquivos num seletor nativo (Tkinter), lista com marca `[editado]`, escolher a tag por número, valor novo (`Enter` cancela, `-` remove, `atual` = ano atual), valida e grava na hora, mostra os formatos aceitos | `metadata.carregar/salvar/validar_valor` → `tags.rs` | terminal | — | pendente |
+| N-03 | Bulk edit: escolher arquivos, escolher um campo entre `CAMPOS_BULK` (artista, álbum, artista do álbum, disco, ano, gênero, compositor, letrista, comentário, gravadora), pedir valor, confirmar `S/N` e aplicar a todos, com relatório de falhas | `metadata.salvar_varios`, `CAMPOS_BULK` → `tags.rs` | terminal | — | pendente |
+
+## O. Distribuição e processo
+
+| Id | Funcionalidade | Núcleo | Interface / build (v2 → v3) | Teste | Status |
+|---|---|---|---|---|---|
+| O-01 | Executável Windows único (`Tagger.exe`) sem precisar de Python, gerado e anexado a uma Release do GitHub ao publicar uma tag `vX.Y.Z` | — | `tagger.spec` + `.github/workflows/release.yml` (PyInstaller) → instalador Tauri (ADR 0001) na CI | testes rodam na CI (`.github/workflows/testes.yml`) | pendente |
+| O-02 | Rodar da fonte (`python -m tagger [caminhos]`) | — | `__main__.py` → `cargo tauri dev` | — | pendente |
+| O-03 | Chaves embutidas no build a partir de segredos (`chaves.json` gerado por `scripts/gerar_chaves.py`, nunca no repositório) | `credenciais.py` → `credenciais.rs` | `release.yml` → CI da v3 | `test_credenciais.py` (`gerar_chaves.py`) | pendente |
+| O-04 | Suíte de testes sem rede e sem tocar nas configurações reais do usuário | — | `tests/conftest.py` → testes do `core/` e do `app/` | `test_qsettings.py` | pendente |
+
+---
+
+## Fica na v2 e não vai para a v3
+
+| Item | Motivo |
+|---|---|
+| Busca online no **Last.fm** (fonte, campo de chave, guia de chave, "versão do álbum pela contagem de execuções") | Removido na 2.2.1 (mudança nos termos da API do Last.fm); a v3 não traz de volta. A chave salva por versões antigas é só apagada (ver J-24). |
+| Diálogo de busca só no MusicBrainz (`gui/busca.py`, `DialogoBusca`) | Substituído por `DialogoBuscaOnline` na 2.2; só restam helpers reaproveitados. Não é funcionalidade separada para o usuário. |
+| Seletor de arquivos em Tkinter na CLI | Detalhe de implementação da v1; depende da decisão sobre a CLI (ver abaixo). |
+| PyInstaller, `tagger.spec`, `QSettings` no registro | Mecanismos da v2; a v3 usa o instalador do Tauri e as preferências do Tauri. O comportamento (preferências lembradas) fica nas linhas J-23 e I-06. |
+
+## Dúvidas para o orquestrador
+
+1. **CLI (N-01 a N-03):** a v3 mantém uma linha de comando? Sem decisão, as linhas ficam `pendente` e podem ir para "fora" se a v3 só for desktop.
+2. **Migração de configurações:** quem já usa a v2 tem tudo no registro (`HKCU\Software\Tagger\Tagger`). A v3 importa isso na primeira execução (tema, colunas, recentes, padrões, token do Discogs) ou começa do zero?
+3. **Token do Discogs e chaves embutidas:** o `chaves.json` embutido da v2 vem de segredos da CI. O Tauri/Rust usa o mesmo esquema (arquivo embutido no build) ou outra forma de embutir a chave?
+4. **Área de transferência e arrastar (D-04, D-05, A-03):** dependem do que o WebView2 expõe; a paridade completa pode precisar de comandos no `src-tauri`. Aceitar diferenças pequenas?
+5. **Testes de interface (todas as linhas com `—` ou `GUI`):** a ADR 0001 deixa em aberto como testar a interface (componentes React e/ou WebDriver). Sem isso, o critério "ok com teste" das linhas de interface não é satisfazível.
+6. **Pasta dos testes de comportamento do núcleo:** os testes pytest da v2 são a especificação; vamos portá-los para `cargo test` (nomes iguais), ou rodar a v2 em paralelo como oráculo na CI (a ADR deixa a comparação com a v2 em aberto)?
+7. **Menus nativos e "Mostrar na pasta":** o Tauri revela o arquivo no Explorer só com plugin; confirmar o plugin aceito (A-15).
+8. **Plataformas:** a v2 só foi empacotada para Windows (barra de título escura, AppUserModelID, nomes reservados do Windows). A v3 mantém o foco em Windows até o Android? Os itens específicos de Windows (I-07, F-02) valem também no Android?
+9. **ID3v2.3 e o patch da lofty (K-01, K-06, K-10):** o comportamento depende de manter o patch do `TCON` (e do tratamento do cabeçalho estendido, lofty-rs #761); a paridade das linhas K-* só vale com isso decidido.
