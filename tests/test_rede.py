@@ -213,6 +213,7 @@ def test_nenhum_cache_em_disco_no_discogs_nem_no_musicbrainz():
 def test_musicbrainz_user_agent_no_formato_exigido():
     assert re.fullmatch(r"Tagger/\S+ \( .+ \)", busca.USER_AGENT)
     assert busca.USER_AGENT.startswith(f"Tagger/{__version__} ( ")
+    assert busca.USER_AGENT == f"Tagger/{__version__} ( https://github.com/morais1dev/Tagger )"
 
 
 def test_musicbrainz_envia_o_user_agent_em_toda_requisicao():
