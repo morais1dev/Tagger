@@ -9,7 +9,8 @@ Tagger is a desktop app for editing and organizing the metadata of MP3, FLAC, Og
 - **v1.0:** Command-line interface (CLI) with the shared metadata backend for individual and bulk MP3 editing.
 - **v2.0:** Desktop application with a graphical interface built with **PySide6 (Qt)**, on the same backend.
 - **v2.1:** FLAC/Ogg/M4A support, online tag lookup (MusicBrainz + Cover Art Archive) and organizing files into `Artist/Album/` folders.
-- **v2.2 (current):** online search window with **MusicBrainz** and **Discogs** (before/after preview), group by album, label tag, a summary after organizing into folders and optional API keys of your own.
+- **v2.2:** online search window with **MusicBrainz** and **Discogs** (before/after preview), group by album, label tag, a summary after organizing into folders and optional API keys of your own.
+- **v2.3 (current):** a **new version notice** (checks the latest GitHub Release at most once a day; can be turned off) and internal cleanups.
 - **v3.0 (planned):** desktop app with Tauri, Android later.
 
 v2 is the Python version of Tagger and lives on the `v2` branch.
@@ -27,6 +28,7 @@ v2 is the Python version of Tagger and lives on the `v2` branch.
 - **Look up tags online** (`Ctrl+Shift+M`): a search window with a before/after preview of every field. Choose **MusicBrainz** (tags, plus the cover from the Cover Art Archive) or **Discogs** (year, track/disc, album artist and label; good for private pressings, vinyl and rare editions, with vinyl positions such as `A1`/`B2` turned into track and disc numbers). Discogs can also be used automatically when MusicBrainz finds nothing. The results arrive as pending changes for you to review. This is the only feature that uses the internet.
 - **Optional API keys of your own** (Settings → Online services): paste a Discogs personal token to use instead of the key built into Tagger. The field is hidden like a password, and keys are never written to the log.
 - **Label** tag for every format, shown in the editor panel and as an optional column.
+- **New version notice**: on startup Tagger checks the latest GitHub Release (at most once a day) and, if there is a newer one, shows a notice with a link to the Release page. It never downloads or installs anything and can be turned off in Settings → Behavior.
 - **Group by album** (Settings → Behavior, off by default): with several albums loaded, the list shows a header per album and orders tracks by disc and track.
 
 **Safe by design**

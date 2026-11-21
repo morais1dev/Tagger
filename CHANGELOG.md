@@ -2,10 +2,13 @@
 
 All notable changes to Tagger are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [2.3.0] — Unreleased
+## [2.3.0] — 2026-11-21
 
 ### Added
 - **New version notice**: when Tagger opens, it checks the project's latest GitHub Release (at most once a day) and, if there is a newer version, shows a notice with a link to the Release page. Tagger never downloads or installs anything by itself, and a failed check (no internet, GitHub error) is silent. You can turn it off in Settings → Behavior.
+
+### Changed
+- A Last.fm API key saved in your settings by an older version is now deleted from them when Tagger starts (Last.fm lookup was already removed in 2.2.1 and the key was ignored).
 
 ## [2.2.1] — 2026-11-21
 
