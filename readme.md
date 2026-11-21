@@ -8,8 +8,11 @@ Tagger is a desktop app for editing and organizing the metadata of MP3, FLAC, Og
 
 - **v1.0:** Command-line interface (CLI) with the shared metadata backend for individual and bulk MP3 editing.
 - **v2.0:** Desktop application with a graphical interface built with **PySide6 (Qt)**, on the same backend.
-- **v2.1 (current):** FLAC/OGG/M4A support, online tag lookup (MusicBrainz + Cover Art Archive) and organizing files into `Artist/Album/` folders.
-- **v3.0 (planned):** Cross-platform application (web and mobile) built with Flutter and Dart.
+- **v2.1:** FLAC/Ogg/M4A support, online tag lookup (MusicBrainz + Cover Art Archive) and organizing files into `Artist/Album/` folders.
+- **v2.2 (current):** online search window with **MusicBrainz** and **Discogs** (before/after preview), group by album, label tag, a summary after organizing into folders and optional API keys of your own.
+- **v3.0 (planned):** desktop app with Tauri, Android later.
+
+v2 is the Python version of Tagger and lives on the `v2` branch.
 
 ## Features
 
@@ -21,7 +24,10 @@ Tagger is a desktop app for editing and organizing the metadata of MP3, FLAC, Og
 - Number tracks in table order, and copy/paste tags between files.
 - Values are validated as you type (year, track/disc numbers, genre).
 - Formats: MP3 (ID3), FLAC and Ogg Vorbis (Vorbis comments), M4A/MP4 (iTunes tags), all with the same fields.
-- **Look up tags online**: find the release on MusicBrainz, match its tracks to your files and get the cover from the Cover Art Archive. The results arrive as pending changes for you to review. This is the only feature that uses the internet.
+- **Look up tags online** (`Ctrl+Shift+M`): a search window with a before/after preview of every field. Choose **MusicBrainz** (tags, plus the cover from the Cover Art Archive) or **Discogs** (year, track/disc, album artist and label; good for private pressings, vinyl and rare editions, with vinyl positions such as `A1`/`B2` turned into track and disc numbers). Discogs can also be used automatically when MusicBrainz finds nothing. The results arrive as pending changes for you to review. This is the only feature that uses the internet.
+- **Optional API keys of your own** (Settings → Online services): paste a Discogs personal token to use instead of the key built into Tagger. The field is hidden like a password, and keys are never written to the log.
+- **Label** tag for every format, shown in the editor panel and as an optional column.
+- **Group by album** (Settings → Behavior, off by default): with several albums loaded, the list shows a header per album and orders tracks by disc and track.
 
 **Safe by design**
 - Every edit is a *pending change* (marked with a dot) until you save; discard any time.
@@ -37,7 +43,7 @@ Tagger is a desktop app for editing and organizing the metadata of MP3, FLAC, Og
 
 **Organizing**
 - **Rename files from tags** with a pattern such as `{tracknumber:02} - {artist} - {title}`, with a live preview, conflict detection and Windows-safe file names (undoable).
-- **Organize into folders** with a pattern such as `{albumartist}/{album}/{tracknumber:02} - {title}`, with a live preview (undoable). It can remove folders left empty, and the folder's cover image (`cover`, `folder` or `front`, `.jpg`/`.png`) goes along when the whole folder moves to the same destination.
+- **Organize into folders** with a pattern such as `{albumartist}/{album}/{tracknumber:02} - {title}`, with a live preview (undoable), followed by a summary of where each file went with an **Open folder** button. It can remove folders left empty, and the folder's cover image (`cover`, `folder` or `front`, `.jpg`/`.png`) goes along when the whole folder moves to the same destination.
 - **Fill tags from file names** with a pattern such as `%artist% - %title%`, including parent folders (`%artist%/%album%/%track% - %title%`).
 - Real multi-value tags: `Artist A; Artist B` is saved as two values that modern players understand.
 - Clean up extra tags: remove everything Tagger doesn't show, and on MP3 also the old ID3v1 tag and unreadable frames.
@@ -95,7 +101,7 @@ python -m tagger.cli
 | `Ctrl+Shift+R` | Rename files from tags |
 | `Ctrl+Shift+T` | Fill tags from file names |
 | `Ctrl+Shift+O` | Organize into folders |
-| `Ctrl+Shift+M` | Look up tags online (MusicBrainz) |
+| `Ctrl+Shift+M` | Look up tags online (MusicBrainz / Discogs) |
 
 Right-click the table for all row actions, and right-click the column header to show/hide columns.
 
@@ -147,8 +153,12 @@ tagger.spec       PyInstaller build
 - Python 3
 - [PySide6](https://doc.qt.io/qtforpython/) (Qt 6) for the interface
 - [Mutagen](https://mutagen.readthedocs.io/) for reading and writing ID3, Vorbis and MP4 tags
-- [MusicBrainz](https://musicbrainz.org/doc/MusicBrainz_API) and the [Cover Art Archive](https://coverartarchive.org/) for online lookup (Python's `urllib`, no extra dependencies)
+- [MusicBrainz](https://musicbrainz.org/doc/MusicBrainz_API), the [Cover Art Archive](https://coverartarchive.org/) and [Discogs](https://www.discogs.com/developers) for online lookup (Python's `urllib`, no extra dependencies)
 - Tkinter (CLI file picker only)
+
+## Credits and attribution
+
+Online search data comes from [MusicBrainz](https://musicbrainz.org) and covers from the [Cover Art Archive](https://coverartarchive.org). Data provided by [Discogs](https://www.discogs.com). This application uses Discogs' API but is not affiliated with, sponsored or endorsed by Discogs. "Discogs" is a trademark of Zink Media, LLC. The same notices are in **About** (`F1`).
 
 ## License
 

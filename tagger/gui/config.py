@@ -22,7 +22,6 @@ PADROES = {
     "otimizar_capa": True,       # capas grandes viram JPEG de no máximo lado_max_capa px
     "lado_max_capa": 1000,
     # serviços online: credenciais próprias, opcionais ("" = usa a chave do Tagger); texto puro no QSettings
-    "lastfm_api_key": "",
     "discogs_token": "",
     # padrões (renomear pelas tags / tags pelo nome)
     "padrao_renomear": "{tracknumber:02} - {artist} - {title}",
@@ -43,7 +42,13 @@ PADROES = {
 DENSIDADES = {"compacta": "Compacta", "confortavel": "Confortável", "espacosa": "Espaçosa"}
 
 
+# chaves de versões antigas, apagadas do QSettings ao carregar (o Last.fm foi removido)
+CHAVES_ANTIGAS = ("config/lastfm_api_key",)
+
+
 def carregar_config(settings):
+    for chave in CHAVES_ANTIGAS:
+        settings.remove(chave)
     config = {}
     for chave, padrao in PADROES.items():
         valor = settings.value(f"config/{chave}", padrao)

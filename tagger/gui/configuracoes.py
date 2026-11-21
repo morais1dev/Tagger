@@ -17,11 +17,6 @@ from tagger.nucleo.credenciais import CHAVES_CONFIG
 AUTOMATICA = "Automática"
 
 TUTORIAL_CHAVES = (
-    "<p><b>Last.fm</b></p><ol>"
-    "<li>Entre na sua conta do Last.fm.</li>"
-    "<li>Abra <a href='https://www.last.fm/api/account/create'>last.fm/api/account/create</a>.</li>"
-    "<li>Preencha nome e descrição (a URL de retorno pode ficar em branco).</li>"
-    "<li>Copie a <b>API key</b> e cole aqui. Não use o \"shared secret\".</li></ol>"
     "<p><b>Discogs</b></p><ol>"
     "<li>Entre na sua conta do Discogs.</li>"
     "<li>Vá em Configurações → Desenvolvedores "
@@ -293,9 +288,7 @@ class DialogoConfiguracoes(QDialog):
                             "funcionar ou se você usa muito.", "ajuda"))
         form = _formulario()
         form.setRowWrapPolicy(QFormLayout.WrapAllRows)      # rótulos longos em cima do campo
-        self.ed_lastfm, linha_lastfm = self._campo_senha("lastfm_api_key", "Chave da API do Last.fm")
         self.ed_discogs, linha_discogs = self._campo_senha("discogs_token", "Token pessoal do Discogs")
-        form.addRow("Chave da API do Last.fm (opcional)", linha_lastfm)
         form.addRow("Token pessoal do Discogs (opcional)", linha_discogs)
         v.addLayout(form)
 
@@ -368,7 +361,6 @@ class DialogoConfiguracoes(QDialog):
         self.sp_lado_capa.setValue(int(c["lado_max_capa"]))
         self.sp_lado_capa.setEnabled(c["otimizar_capa"])
         self.tx_generos.setPlainText("\n".join(c["generos"]))
-        self.ed_lastfm.setText(c["lastfm_api_key"])
         self.ed_discogs.setText(c["discogs_token"])
         self._atualizar_amostras()
         self._preenchendo = False

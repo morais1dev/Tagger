@@ -1,4 +1,4 @@
-"""Discogs, Last.fm e as peças comuns (online.py): HTTP sempre simulado, nunca usa a rede."""
+"""Discogs e as peças comuns (online.py): HTTP sempre simulado, nunca usa a rede."""
 
 import io
 import json
@@ -8,15 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from tagger.nucleo import discogs, lastfm, online
+from tagger.nucleo import discogs, online
 from tagger.nucleo.busca import ErroBusca
 from tagger.nucleo.discogs import ClienteDiscogs, interpretar_posicao, numerar
-from tagger.nucleo.lastfm import ClienteLastfm
 from tagger.nucleo.metadata import Faixa
 from tagger.nucleo.rascunho import Rascunho
 
 TOKEN = "Discogs token=SEGREDOtok123"
-CHAVE_LASTFM = "chaveLASTFM987"
 
 
 class Resposta:
@@ -305,124 +303,6 @@ def test_resultado_discogs_entra_no_rascunho():
     assert not rascunho.capas                                     # nunca capa do Discogs
 
 
-# ---------------------------------------------------------------------------
-# Last.fm
-# ---------------------------------------------------------------------------
-
-TOP = {"topalbums": {"album": [
-    {"name": "Album X (Deluxe Edition)", "playcount": "500", "url": "https://www.last.fm/music/Banda/Album+X+(Deluxe+Edition)",
-     "artist": {"name": "Banda", "url": "https://www.last.fm/music/Banda"},
-     "image": [{"#text": "https://lastfm.freetls.fastly.net/i/capa.png"}]},
-    {"name": "Album X", "playcount": "9000", "url": "https://www.last.fm/music/Banda/Album+X",
-     "artist": {"name": "Banda", "url": "https://www.last.fm/music/Banda"}},
-    {"name": "Outro", "playcount": "100", "artist": {"name": "Banda"}},
-    {"name": "Album X - 2011 Remaster", "playcount": "700", "artist": {"name": "Banda"}},
-    {"name": "(null)", "playcount": "1"}]}}
-
-INFO = {"album": {"name": "Album X", "artist": "Banda", "playcount": "9000", "mbid": "m1",
-                  "url": "https://www.last.fm/music/Banda/Album+X",
-                  "image": [{"#text": "https://lastfm.freetls.fastly.net/i/capa.png"}],
-                  "tags": {"tag": {"name": "rock"}},
-                  "tracks": {"track": [
-                      {"name": "Primeira", "@attr": {"rank": 1}, "artist": {"name": "Banda"}},
-                      {"name": "Segunda", "@attr": {"rank": 2}, "artist": {"name": "Banda feat. C"}}]}}}
-
-
-def cliente_lastfm(respostas, api_key=CHAVE_LASTFM, cache=None):
-    rede = Rede(respostas)
-    lim, relogio = limitador_falso(maximo=1, janela=lastfm.INTERVALO, intervalo=lastfm.INTERVALO)
-    return ClienteLastfm(api_key, rede, lim, cache or online.Cache(10 ** 6)), rede, relogio
-
-
-def test_lastfm_mais_scrobblado_e_versoes():
-    c, rede, _ = cliente_lastfm({"artist.getTopAlbums": Resposta(TOP)})
-    assert c.album_mais_scrobblado("banda").titulo == "Album X"
-    versoes = c.versoes("Banda", "album x")
-    assert [(v.titulo, v.playcount) for v in versoes] == \
-        [("Album X", 9000), ("Album X - 2011 Remaster", 700), ("Album X (Deluxe Edition)", 500)]
-    assert versoes[0].atribuicao[1] == [("Banda", "https://www.last.fm/music/Banda"),
-                                        ("Album X", "https://www.last.fm/music/Banda/Album+X")]
-    assert not hasattr(versoes[0], "imagem")
-    assert all(p.full_url.endswith(f"api_key={CHAVE_LASTFM}") for p in rede.pedidos)
-
-
-def test_lastfm_nome_canonico():
-    c, _, _ = cliente_lastfm({"artist.getCorrection": Resposta(
-        {"corrections": {"correction": {"artist": {"name": "The Beatles"}}}})})
-    assert c.nome_canonico("the beatles") == "The Beatles"
-    c, _, _ = cliente_lastfm({"artist.getCorrection": Resposta({"corrections": "\n"})})
-    assert c.nome_canonico("Banda") == "Banda"
-
-
-def test_lastfm_detalhar_album_e_rascunho():
-    c, rede, _ = cliente_lastfm({"album.getInfo": Resposta(INFO)})
-    a = c.detalhar_album("banda", "album x")
-    assert (a.titulo, a.artista, a.etiquetas) == ("Album X", "Banda", ["rock"])
-    assert [(f.titulo, f.numero, f.artista) for f in a.faixas] == [("Primeira", 1, "Banda"), ("Segunda", 2, "Banda feat. C")]
-    assert "autocorrect=1" in rede.pedidos[0].full_url
-    f = faixa("2.mp3", title="segunda")
-    rascunho = Rascunho()
-    rascunho.definir_por_faixa(lastfm.montar_alteracoes([f], a, valor=rascunho.valor))
-    assert rascunho.valor(f, "title") == "Segunda" and rascunho.valor(f, "artist") == "Banda feat. C"
-    assert rascunho.valor(f, "genre") == "" and not rascunho.capas
-
-
-def test_lastfm_backoff_no_erro_29():
-    c, rede, relogio = cliente_lastfm({"album.getInfo": [
-        Resposta({"error": 29, "message": "Rate Limit Exceeded"}),
-        http_erro("u", 429, {"error": 29, "message": "Rate Limit Exceeded"}),
-        Resposta(INFO)]})
-    assert c.detalhar_album("Banda", "Album X").titulo == "Album X"
-    assert len(rede.pedidos) == 3
-    assert relogio.esperas == [lastfm.BACKOFF, lastfm.BACKOFF * 2]
-
-
-def test_lastfm_erro_29_persistente_e_limite_de_2_por_segundo():
-    c, rede, relogio = cliente_lastfm({"album.getInfo": Resposta({"error": 29, "message": "x"})})
-    with pytest.raises(ErroBusca, match="limitando"):
-        c.detalhar_album("Banda", "Album X")
-    assert len(rede.pedidos) == lastfm.TENTATIVAS
-    c, _, relogio = cliente_lastfm({"getTopAlbums": Resposta(TOP)})
-    c.top_albuns("a")
-    c.top_albuns("b")
-    assert relogio.esperas == [pytest.approx(lastfm.INTERVALO)]
-
-
-@pytest.mark.parametrize("resposta,trecho", [
-    (Resposta({"error": 6, "message": "Album not found"}), "Nada encontrado"),
-    (http_erro(f"https://ws/?api_key={CHAVE_LASTFM}", 403, {"error": 10, "message": "Invalid API key"}), "recusou"),
-    (http_erro(f"https://ws/?api_key={CHAVE_LASTFM}", 500, b"<html>"), "500"),
-    (urllib.error.URLError(f"falhou https://ws/?api_key={CHAVE_LASTFM}"), "conexão"),
-])
-def test_lastfm_erros_sem_chave_na_mensagem(resposta, trecho):
-    c, _, _ = cliente_lastfm({"album.getInfo": resposta})
-    with pytest.raises(ErroBusca, match=trecho) as info:
-        c.detalhar_album("Banda", "Album X")
-    assert CHAVE_LASTFM not in str(info.value) and CHAVE_LASTFM not in getattr(info.value, "detalhe", "")
-    assert info.value.__cause__ is None
-
-
-def test_lastfm_sem_chave_desativado():
-    c, rede, _ = cliente_lastfm({}, api_key="  ")
-    with pytest.raises(ErroBusca, match="indisponível"):
-        c.top_albuns("Banda")
-    assert rede.pedidos == []
-
-
-def test_lastfm_cache_respeita_cabecalhos_e_nao_grava_a_chave(tmp_path):
-    cache = online.Cache(lastfm.TETO_CACHE, pasta=tmp_path)
-    c, rede, _ = cliente_lastfm({"album.getInfo": Resposta(INFO, {"Cache-Control": "max-age=3600"}),
-                                 "getTopAlbums": Resposta(TOP, {"Cache-Control": "no-store"})}, cache=cache)
-    c.detalhar_album("Banda", "Album X")
-    c.detalhar_album("Banda", "Album X")
-    c.top_albuns("Banda")
-    c.top_albuns("Banda")
-    assert len(rede.pedidos) == 3                     # 1 getInfo (cache) + 2 getTopAlbums (no-store)
-    arquivos = list(tmp_path.iterdir())
-    assert len(arquivos) == 1
-    assert CHAVE_LASTFM not in arquivos[0].name and CHAVE_LASTFM not in arquivos[0].read_text("utf-8")
-
-
 def test_ocultar_passa_as_conhecidas_para_credenciais_py(monkeypatch):
     chamadas = []
 
@@ -453,17 +333,17 @@ def test_authorization_do_discogs_nunca_segue_redirect():
 @pytest.mark.parametrize("destino", ["http://api.discogs.com/x", "ftp://api.discogs.com/x", "file:///etc/passwd"])
 def test_redirect_para_fora_do_https_e_recusado(destino):
     h = online._RedirecionamentoSeguro()
-    pedido = urllib.request.Request(f"https://ws.audioscrobbler.com/2.0/?api_key={CHAVE_LASTFM}")
+    pedido = urllib.request.Request("https://api.discogs.com/x?token=chaveDISCOGS987")
     with pytest.raises(online.RedirecionamentoRecusado):
         h.redirect_request(pedido, None, 302, "Found", {}, destino)
 
 
 def test_redirect_recusado_tem_mensagem_propria_sem_credencial():
-    url = f"http://ws.audioscrobbler.com/2.0/?api_key={CHAVE_LASTFM}"
-    c, _, _ = cliente_lastfm({"album.getInfo": online.RedirecionamentoRecusado(f"recusado: {url}")})
+    url = "http://api.discogs.com/x?token=chaveDISCOGS987"
+    c, _, _, _ = cliente_discogs({"/releases/": online.RedirecionamentoRecusado(f"recusado: {url}")})
     with pytest.raises(ErroBusca, match="Redirecionamento inseguro recusado") as info:
-        c.detalhar_album("Banda", "Album X")
-    assert CHAVE_LASTFM not in info.value.detalhe
+        c.detalhar_release(1)
+    assert "chaveDISCOGS987" not in info.value.detalhe
     d, _, _, _ = cliente_discogs({"/releases/": online.RedirecionamentoRecusado("recusado")})
     with pytest.raises(ErroBusca, match="Redirecionamento inseguro recusado"):
         d.detalhar_release(1)
@@ -512,13 +392,6 @@ def test_links_falsos_do_json_trocados_pelos_montados():
     assert [cand.url for cand in c.buscar_releases("a", "b")] == \
         ["https://www.discogs.com/release/5", "https://www.discogs.com/release/6"]
     assert c.detalhar_release(123).url == "https://www.discogs.com/release/123"
-    top = {"topalbums": {"album": [{"name": "X", "playcount": "1", "url": "file:///c:/x",
-                                    "artist": {"name": "Banda", "url": "javascript:alert(1)"}}]}}
-    info = {"album": dict(INFO["album"], url="https://last.fm.evil.com/x")}
-    cl, _, _ = cliente_lastfm({"getTopAlbums": Resposta(top), "album.getInfo": Resposta(info)})
-    a = cl.top_albuns("Banda")[0]
-    assert (a.url, a.url_artista) == ("https://www.last.fm/music/Banda/X", "https://www.last.fm/music/Banda")
-    assert cl.detalhar_album("Banda", "Album X").url == "https://www.last.fm/music/Banda/Album+X"
 
 
 @pytest.mark.parametrize("corpo", [
@@ -546,20 +419,6 @@ def test_json_estranho_do_discogs_no_release_vira_erro_busca(corpo):
     c, _, _, _ = cliente_discogs({"/releases/1": Resposta(corpo)})
     with pytest.raises(ErroBusca, match="inválida"):
         c.detalhar_release(1)
-
-
-@pytest.mark.parametrize("metodo,corpo", [
-    ("top_albuns", [1]),
-    ("top_albuns", {"topalbums": {"album": ["x"]}}),
-    ("top_albuns", {"topalbums": {"album": [{"name": 5}]}}),
-    ("nome_canonico", {"corrections": {"correction": ["x"]}}),
-    ("detalhar_album", {"album": {"name": "x", "tracks": {"track": ["y"]}}}),
-    pytest.param("detalhar_album", PROFUNDO, id="profundo"),
-])
-def test_json_estranho_do_lastfm_vira_erro_busca(metodo, corpo):
-    c, _, _ = cliente_lastfm({"method=": Resposta(corpo)})
-    with pytest.raises(ErroBusca, match="inválida"):
-        getattr(c, metodo)(*(["Banda", "Album"] if metodo == "detalhar_album" else ["Banda"]))
 
 
 def test_numerar_subfaixas_numericas_seguem_a_contagem():

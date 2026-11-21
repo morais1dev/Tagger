@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from tagger import __version__
-from tagger.nucleo import discogs, lastfm
+from tagger.nucleo import discogs
 
 
 def texto_sobre():
@@ -15,8 +15,7 @@ def texto_sobre():
         f"<p><b>Tagger {html.escape(__version__)}</b><br>Editor de tags de música.</p>"
         "<p>Busca online: tags do <a href=\"https://musicbrainz.org\">MusicBrainz</a>, capas do "
         "<a href=\"https://coverartarchive.org\">Cover Art Archive</a>, dados do "
-        f"<a href=\"{discogs.URL_SITE}\">Discogs</a> e do <a href=\"https://www.last.fm\">Last.fm</a> "
-        f"({html.escape(lastfm.ATRIBUICAO)}; uso não comercial).</p>"
+        f"<a href=\"{discogs.URL_SITE}\">Discogs</a>.</p>"
         f"<p>{html.escape(discogs.AVISO_SOBRE)}</p>"
     )
 
