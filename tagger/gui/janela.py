@@ -36,7 +36,8 @@ from tagger.gui.icones import icone, icone_app, pixmap
 from tagger.gui.limpeza import DialogoLimpeza
 from tagger.gui.organizar import DialogoOrganizar, DialogoResumoOrganizar
 from tagger.gui.padrao import DialogoRenomear, DialogoTagsDoNome, lembrar_padrao
-from tagger.nucleo.rascunho import Rascunho, Renomeacao, executar_salvamento, migrar_historico
+from tagger.nucleo.historico import ARQUIVOS, DESCARTAR, DESFAZER, ORGANIZAR, REFAZER, TAGS, Historico
+from tagger.nucleo.rascunho import Rascunho, executar_salvamento
 from tagger.gui.rotulo import Migalha, RotuloElidido
 from tagger.gui.tabela import FiltroFaixas, ModeloFaixas, TabelaFaixas
 from tagger.gui.vazio import TelaVazia
@@ -236,9 +237,7 @@ class JanelaPrincipal(QMainWindow):
 
         self.rascunho = Rascunho()
         self.rascunho.ao_mudar = self._ao_mudar_rascunho
-        self.historico_pendente = None   # (registros, "desfazer" | "refazer") aguardando Salvar
-        self.pilha_desfazer = []         # cada item: lista de registros (caminho, tags, capa) ou Renomeacao
-        self.pilha_refazer = []
+        self.historico = Historico()     # pilhas de desfazer/refazer e o desfazer pendente (nucleo/historico.py)
         self.area_tags = None            # tags copiadas: {"tags": {...}, "capa": (dados, mime) | None}
 
         self.pasta_atual = None
@@ -248,7 +247,7 @@ class JanelaPrincipal(QMainWindow):
         self._salvador = None
         self._limpador = None
         self._movedor = None
-        self._mtimes_antes, self._itens_movendo, self._pilha_movendo, self._desfazendo = {}, [], None, None
+        self._mtimes_antes, self._itens_movendo, self._tipo_movendo, self._item_revertido = {}, [], ORGANIZAR, None
         self._pastas_do_movimento = ()   # (pasta aberta antes de organizar, destino): a migalha segue ao desfazer
         self._pastas_criadas = set()     # pastas de destino que o Tagger criou (para limpar ao desfazer)
         self._modo_carregar = "substituir"   # "substituir" | "adicionar" | "recarregar"
@@ -793,9 +792,7 @@ class JanelaPrincipal(QMainWindow):
             self._ao_recarregar(faixas, falhas)
         elif self._modo_carregar == "substituir":
             self.rascunho.descartar()
-            self.historico_pendente = None
-            self.pilha_desfazer.clear()
-            self.pilha_refazer.clear()
+            self.historico.limpar()
             self.modelo.definir(faixas)
             self.painel.invalidar_capas()
             self.painel.carregar([])
@@ -973,17 +970,7 @@ class JanelaPrincipal(QMainWindow):
         salvos = [c for c in caminhos if c not in falhas]
         self.rascunho.descartar(salvos)
 
-        registros_ok = [r for r in registros if r[0] not in falhas]
-        if registros_ok:
-            tipo = self.historico_pendente[1] if self.historico_pendente else None
-            if tipo == "desfazer":
-                self.pilha_refazer.append(registros_ok)
-            elif tipo == "refazer":
-                self.pilha_desfazer.append(registros_ok)
-            else:
-                self.pilha_desfazer.append(registros_ok)
-                self.pilha_refazer.clear()
-        self.historico_pendente = None
+        self.historico.registrar_gravacao([r for r in registros if r[0] not in falhas])
 
         self._carregar_selecao()
         self._atualizar_generos()
@@ -999,10 +986,7 @@ class JanelaPrincipal(QMainWindow):
 
     def descartar(self):
         """Descarta todas as alterações pendentes (e devolve um desfazer/refazer não confirmado)."""
-        if self.historico_pendente:
-            registros, tipo = self.historico_pendente
-            (self.pilha_desfazer if tipo == "desfazer" else self.pilha_refazer).append(registros)
-            self.historico_pendente = None
+        self.historico.descartar_pendente()
         if not self.rascunho.vazio:
             self.rascunho.descartar()
             self.avisar("Alterações descartadas")
@@ -1021,26 +1005,24 @@ class JanelaPrincipal(QMainWindow):
         """Com alterações pendentes: descarta. Senão: coloca os valores anteriores como pendentes."""
         if self._gravando():
             return
-        if not self.rascunho.vazio or self.historico_pendente:
+        acao, item = self.historico.retirar(DESFAZER, self.rascunho.vazio)
+        if acao == DESCARTAR:
             self.descartar()
-            return
-        if self.pilha_desfazer:
-            item = self.pilha_desfazer.pop()
-            if isinstance(item, Renomeacao):
-                self._reverter_renomeacao(item, self.pilha_refazer, "Desfeito")
-            else:
-                self._preparar_historico(item, "desfazer")
+        elif acao == ARQUIVOS:
+            self._reverter_renomeacao(item, DESFAZER, "Desfeito")
+        elif acao == TAGS:
+            self._preparar_historico(item, DESFAZER)
 
     def refazer(self):
-        if self._gravando() or not self.rascunho.vazio or not self.pilha_refazer:
+        if self._gravando():
             return
-        item = self.pilha_refazer.pop()
-        if isinstance(item, Renomeacao):
-            self._reverter_renomeacao(item, self.pilha_desfazer, "Refeito")
-        else:
-            self._preparar_historico(item, "refazer")
+        acao, item = self.historico.retirar(REFAZER, self.rascunho.vazio)
+        if acao == ARQUIVOS:
+            self._reverter_renomeacao(item, REFAZER, "Refeito")
+        elif acao == TAGS:
+            self._preparar_historico(item, REFAZER)
 
-    def _reverter_renomeacao(self, item, pilha_oposta, verbo):
+    def _reverter_renomeacao(self, item, tipo, verbo):
         """Renomear/mover não passa pelo rascunho: desfazer/refazer move de volta na hora (em segundo plano)."""
         plano = [ItemRenomear(origem, destino) for origem, destino in item.inversa().pares]
         liberadas, criadas = set(self._pastas_criadas), []
@@ -1051,30 +1033,26 @@ class JanelaPrincipal(QMainWindow):
             remover_pastas_vazias({o.parent for o, _d in feitos}, permitidas=liberadas)
             return feitos, falhas
 
-        pilha_origem = self.pilha_refazer if pilha_oposta is self.pilha_desfazer else self.pilha_desfazer
-
         def concluir(resultado):
             feitos, falhas = resultado
             self._pastas_criadas.update(criadas)
             self._aplicar_renomeacao(dict(feitos), self._mtimes_antes)
             self._seguir_arquivos_movidos(*self._pastas_do_movimento)
-            if feitos:
-                pilha_oposta.append(Renomeacao(feitos))
-            if falhas:        # o que não voltou continua no histórico para tentar de novo
-                pilha_origem.append(Renomeacao([(a, n) for a, n in item.pares if n in falhas]))
+            self.historico.concluir_reversao(tipo, item, feitos, falhas)   # o que não voltou fica para tentar de novo
+            if falhas:
                 nomes = ", ".join(Path(c).name for c in list(falhas)[:3])
                 self.avisar(f"{verbo}: {len(feitos)} movido(s), {len(falhas)} falharam: {nomes}", erro=True)
             else:
                 self.avisar(f"{verbo}: {len(feitos)} arquivo(s) no lugar anterior", ok=True)
 
-        self._mover_em_segundo_plano(tarefa, concluir, "Movendo arquivos…", plano, pilha_oposta, (item, pilha_origem))
+        self._mover_em_segundo_plano(tarefa, concluir, "Movendo arquivos…", plano, tipo, item)
 
-    def _mover_em_segundo_plano(self, tarefa, concluir, texto, itens=(), pilha=None, desfazendo=None):
+    def _mover_em_segundo_plano(self, tarefa, concluir, texto, itens=(), tipo=ORGANIZAR, item_revertido=None):
         """Bloqueia a janela (cursor de espera) enquanto `tarefa` roda; `concluir(resultado)` roda na interface.
-        itens: [ItemRenomear] previstos; se a tarefa quebrar, o que já foi movido é registrado em `pilha`.
-        desfazendo: (Renomeacao, pilha de onde saiu) quando é desfazer/refazer; None = organizar novo."""
+        itens: [ItemRenomear] previstos; se a tarefa quebrar, o que já foi movido entra no histórico.
+        tipo: ORGANIZAR (ação nova), DESFAZER ou REFAZER (com a Renomeacao retirada da pilha em `item_revertido`)."""
         self._mtimes_antes = {i.origem: mtime_atual(i.origem) for i in itens}
-        self._itens_movendo, self._pilha_movendo, self._desfazendo = list(itens), pilha, desfazendo
+        self._itens_movendo, self._tipo_movendo, self._item_revertido = list(itens), tipo, item_revertido
         self._bloquear(True)
         QApplication.setOverrideCursor(Qt.WaitCursor)
         self.lbl_status.setText(texto)
@@ -1098,32 +1076,22 @@ class JanelaPrincipal(QMainWindow):
                       if not i.origem.exists() and i.destino.exists()]
             self._aplicar_renomeacao(dict(feitos), self._mtimes_antes)
             self._seguir_arquivos_movidos(*self._pastas_do_movimento)
-            if feitos and self._pilha_movendo is not None:
-                self._pilha_movendo.append(Renomeacao(feitos))
-            if self._desfazendo is None:
-                self.pilha_refazer.clear()          # organizar novo invalida o refazer
-            else:                                   # o que não voltou continua na pilha de onde saiu
-                item, pilha_origem = self._desfazendo
-                feitos_inversos = {(d, o) for o, d in feitos}
-                faltam = [(a, n) for a, n in item.pares if (a, n) not in feitos_inversos]
-                if faltam:
-                    pilha_origem.append(Renomeacao(faltam))
+            self.historico.registrar_movimento_interrompido(self._tipo_movendo, feitos, self._item_revertido)
             self.avisar(f"Erro ao mover os arquivos ({resultado}); {len(feitos)} já foram movidos.", erro=True)
         else:
             concluir(resultado)
         self._atualizar_estado()
 
     def _preparar_historico(self, registros, tipo):
-        mudou = self.rascunho.aplicar_registros(registros, self.modelo.por_caminho())
+        mudou = self.historico.preparar(registros, tipo, self.rascunho, self.modelo.por_caminho())
         if not mudou:
             self.avisar("Os arquivos já estão nesse estado.")
             self._atualizar_estado()
             return
-        self.historico_pendente = (registros, tipo)
         linhas = [i for i, f in enumerate(self.modelo.faixas) if f.caminho in mudou]
         self.tabela.selecionar_linhas(linhas)
         self._carregar_selecao()
-        acao = "Desfazer" if tipo == "desfazer" else "Refazer"
+        acao = "Desfazer" if tipo == DESFAZER else "Refazer"
         self.avisar(f"{acao}: revise e clique em Salvar para confirmar (Esc cancela)")
 
     # ------------------------------------------------------------------ menu das linhas
@@ -1231,9 +1199,7 @@ class JanelaPrincipal(QMainWindow):
         self._lembrar_padrao("renomear", dialogo.padrao)
         feitos, falhas = executar_renomeacao([item for item in dialogo.plano if item.valido])
         self._aplicar_renomeacao(dict(feitos))
-        if feitos:
-            self.pilha_desfazer.append(Renomeacao(feitos))
-            self.pilha_refazer.clear()
+        self.historico.registrar_renomeacao(feitos)
         if falhas:
             for caminho, erro in falhas.items():
                 log.warning("Não renomeou %s: %s", caminho, erro)
@@ -1261,9 +1227,7 @@ class JanelaPrincipal(QMainWindow):
             feitos, falhas, removidas = resultado
             self._pastas_criadas.update(criadas)
             self._aplicar_renomeacao(dict(feitos), self._mtimes_antes)
-            if feitos:
-                self.pilha_desfazer.append(Renomeacao(feitos))
-                self.pilha_refazer.clear()
+            self.historico.registrar_renomeacao(feitos)
             extra = f" · {len(removidas)} pasta(s) vazia(s) removida(s)" if removidas else ""
             if falhas:
                 for caminho, erro in falhas.items():
@@ -1277,7 +1241,7 @@ class JanelaPrincipal(QMainWindow):
                 DialogoResumoOrganizar(feitos, falhas, plano.pasta, self).exec()
 
         self._mover_em_segundo_plano(lambda: executar_organizacao(plano, remover, raiz, criadas), concluir,
-                                     f"Movendo {len(plano.validos())} arquivos…", plano.validos(), self.pilha_desfazer)
+                                     f"Movendo {len(plano.validos())} arquivos…", plano.validos(), ORGANIZAR)
 
     def _seguir_arquivos_movidos(self, *preferidas):
         """Migalha (e F5) acompanham os arquivos quando saem da pasta aberta (ver nucleo.pasta_apos_mover)."""
@@ -1332,13 +1296,7 @@ class JanelaPrincipal(QMainWindow):
                 if antigo is not None and mtimes_antes.get(antigo) == faixa.mtime:
                     faixa.mtime = mtime_atual(faixa.caminho) or faixa.mtime
         self.rascunho.renomear(mapa)
-        migrar_historico(self.pilha_desfazer, mapa)
-        migrar_historico(self.pilha_refazer, mapa)
-        if self.historico_pendente:
-            registros, tipo = self.historico_pendente
-            pilha = [registros]
-            migrar_historico(pilha, mapa)
-            self.historico_pendente = (pilha[0], tipo)
+        self.historico.migrar(mapa)
         self.painel.invalidar_capas([*mapa, *mapa.values()])
         self._carregar_selecao()
 
@@ -1438,7 +1396,7 @@ class JanelaPrincipal(QMainWindow):
             self.busca.clear()
         elif foco is not None and self.painel.isAncestorOf(foco):
             self.tabela.setFocus()
-        elif self.historico_pendente:
+        elif self.historico.pendente:
             self.descartar()
 
     def _atualizar_contagem(self, *_):
@@ -1487,10 +1445,10 @@ class JanelaPrincipal(QMainWindow):
 
         self.btn_salvar_topo.setEnabled(pendente and not trabalhando)
         self.btn_salvar_topo.setText(f"Salvar · {n_arquivos}" if n_arquivos > 1 else "Salvar")
-        pode_desfazer = pendente or bool(self.pilha_desfazer) or bool(self.historico_pendente)
+        pode_desfazer = self.historico.pode_desfazer(pendente)
         self.btn_desfazer.setEnabled(pode_desfazer and not trabalhando)
         self.btn_desfazer.setToolTip("Descartar alterações não salvas (Ctrl+Z)" if pendente else "Desfazer (Ctrl+Z)")
-        self.btn_refazer.setEnabled(not pendente and bool(self.pilha_refazer) and not trabalhando)
+        self.btn_refazer.setEnabled(self.historico.pode_refazer(pendente) and not trabalhando)
         self.painel.atualizar_rodape()
         self._atualizar_contagem()
 

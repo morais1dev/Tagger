@@ -3,10 +3,13 @@
 O QSettings é trocado por um arquivo .ini em tmp_path: as configurações reais do usuário nunca são tocadas."""
 
 import pytest
-from PySide6.QtCore import QSettings
 
-from tagger.gui import janela as modulo_janela
-from tagger.nucleo.metadata import OpcoesGravacao
+pytest.importorskip("PySide6")
+
+from PySide6.QtCore import QSettings  # noqa: E402
+
+from tagger.gui import janela as modulo_janela  # noqa: E402
+from tagger.nucleo.metadata import OpcoesGravacao  # noqa: E402
 
 
 @pytest.fixture
@@ -52,3 +55,13 @@ def test_salvar_usa_as_opcoes_da_config(janela, monkeypatch):
     janela.rascunho.tags["x.mp3"] = {"title": "A"}
     janela.salvar(sincrono=True)
     assert chamadas == [OpcoesGravacao(versao_id3=4, multivalor=False, remover_id3v1=True)]
+
+
+def test_janela_usa_o_historico_do_nucleo(janela):
+    """Depois da ligação ao núcleo: sem histórico, desfazer/refazer ficam desabilitados e o Esc não faz nada."""
+    janela._atualizar_estado()
+    assert janela.historico.desfazer == [] and janela.historico.refazer == [] and janela.historico.pendente is None
+    assert not janela.btn_desfazer.isEnabled() and not janela.btn_refazer.isEnabled()
+    janela.historico.registrar_renomeacao([("a.mp3", "b.mp3")])
+    janela._atualizar_estado()
+    assert janela.btn_desfazer.isEnabled()
