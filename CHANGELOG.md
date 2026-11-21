@@ -2,7 +2,7 @@
 
 All notable changes to Tagger are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [2.2.1] — Unreleased
+## [2.2.1] — 2026-11-21
 
 ### Fixed
 - MusicBrainz requests now send a real contact in the User-Agent.
