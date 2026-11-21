@@ -197,11 +197,12 @@ class Rascunho:
         return mudou
 
 
-def executar_salvamento(trabalhos, progresso=None, mtimes=None):
+def executar_salvamento(trabalhos, progresso=None, mtimes=None, opcoes=None):
     """
     Grava os trabalhos nos arquivos. Roda em segundo plano (ou direto, ao fechar o app).
     mtimes: {caminho: st_mtime_ns esperado}. Se o arquivo mudou no disco desde então,
     ele NÃO é gravado (vira falha) para não sobrescrever a alteração de outro programa.
+    opcoes: OpcoesGravacao (None = padrões).
     Devolve (registros_para_desfazer, falhas {caminho: erro}, faixas relidas do disco).
     """
     registros, falhas = [], {}
@@ -217,7 +218,7 @@ def executar_salvamento(trabalhos, progresso=None, mtimes=None):
                 raise ArquivoModificado("o arquivo foi alterado por outro programa")
             capa_antes = ler_capa(caminho) if capa else SEM_CAPA
             registro = (caminho, {campo: faixa.tags[campo] for campo in tags}, capa_antes)
-            salvar(caminho, tags, capa)          # tags + capa num único save
+            salvar(caminho, tags, capa, opcoes)          # tags + capa num único save
             registros.append(registro)
         except Exception as erro:          # somente leitura, em uso por outro programa...
             falhas[caminho] = str(erro)

@@ -13,7 +13,8 @@ Formatos: MP3 (ID3, aqui mesmo), FLAC e Ogg (Vorbis, Opus ou FLAC no Ogg; Vorbis
 formatos/vorbis.py) e M4A/MP4 (átomos do iTunes, formatos/mp4.py). Os mesmos campos valem
 para todos. A capa é a imagem frontal (ver formatos.escolher_capa); no M4A/MP4, que não tem
 tipo de imagem, é a 1ª do átomo covr (e só JPEG/PNG).
-As opções de ID3 (VERSAO_ID3, REMOVER_ID3V1) e a limpeza de ID3v1 / frames
+As opções de gravação (OpcoesGravacao) entram como parâmetro nas funções que gravam; sem elas valem
+os padrões da classe. A versão do ID3, a remoção do ID3v1 e a limpeza de ID3v1 / frames
 desconhecidos só se aplicam ao MP3; nos outros formatos são ignoradas.
 """
 
@@ -41,16 +42,20 @@ from tagger.nucleo.formatos import mp4, vorbis
 # Configuração
 # ---------------------------------------------------------------------------
 
-# Versão do ID3v2 usada ao salvar. 3 (ID3v2.3) é a mais compatível: Windows
-# Explorer, carros e players antigos leem bem. Troque para 4 se preferir v2.4.
-VERSAO_ID3 = 3
 
-# "A; B" em artista, gênero etc. é gravado como vários valores (text=["A", "B"]).
-# Players modernos (foobar2000, MusicBee, Plex...) mostram cada valor separado.
-MULTIVALOR = True
 
-# Remove a tag ID3v1 (128 bytes no fim do arquivo, formato dos anos 90) ao salvar.
-REMOVER_ID3V1 = False
+@dataclass(frozen=True)
+class OpcoesGravacao:
+    """Como gravar as tags. Passada às funções que gravam; sem ela valem estes padrões."""
+    # Versão do ID3v2 (só MP3). 3 (ID3v2.3) é a mais compatível: Windows Explorer, carros e
+    # players antigos leem bem. 4 grava ID3v2.4.
+    versao_id3: int = 3
+    # "A; B" em artista, gênero etc. é gravado como vários valores (todos os formatos).
+    # Players modernos (foobar2000, MusicBee, Plex...) mostram cada valor separado.
+    multivalor: bool = True
+    # Remove a tag ID3v1 (128 bytes no fim do arquivo, formato dos anos 90) ao salvar (só MP3).
+    remover_id3v1: bool = False
+
 
 EXTENSOES_SUPORTADAS = {".mp3", ".flac", ".ogg", ".m4a", ".mp4"}
 
@@ -82,7 +87,7 @@ CAMPOS_BULK = [
     "genre", "composer", "lyricist", "comment", "gravadora",
 ]
 
-# Campos em que "A; B" vira vários valores ao salvar (se MULTIVALOR estiver ligado).
+# Campos em que "A; B" vira vários valores ao salvar (se OpcoesGravacao.multivalor estiver ligado).
 CAMPOS_MULTIVALOR = {"artist", "albumartist", "genre", "composer", "lyricist"}
 SEPARADOR = "; "
 
@@ -378,15 +383,15 @@ def validar_alteracoes(alteracoes):
 # Escrita
 # ---------------------------------------------------------------------------
 
-def dividir_valores(campo, valor):
-    """'A; B' -> ['A', 'B'] nos campos multivalor (se ligado); senão [valor]."""
-    if not (MULTIVALOR and campo in CAMPOS_MULTIVALOR):
+def dividir_valores(campo, valor, multivalor=True):
+    """'A; B' -> ['A', 'B'] nos campos multivalor (se `multivalor` estiver ligado); senão [valor]."""
+    if not (multivalor and campo in CAMPOS_MULTIVALOR):
         return [valor]
     partes = [p.strip() for p in valor.split(";")]
     return [p for p in partes if p] or [valor]
 
 
-def _aplicar_campo(tags, campo, valor):
+def _aplicar_campo(tags, campo, valor, multivalor):
     if campo == "comment":
         for chave in [k for k, f in tags.items() if k.startswith("COMM") and f.desc == ""]:
             del tags[chave]
@@ -407,7 +412,7 @@ def _aplicar_campo(tags, campo, valor):
     classe = CAMPOS[campo][1]
     tags.delall(classe.__name__)
     if valor:
-        tags.add(classe(encoding=3, text=dividir_valores(campo, valor)))
+        tags.add(classe(encoding=3, text=dividir_valores(campo, valor, multivalor)))
 
 
 def _descricao_livre(tags):
@@ -427,17 +432,17 @@ def _aplicar_capa(tags, capa):
                       desc=_descricao_livre(tags), data=capa[1]))
 
 
-def _gravar(audio, remover_id3v1=False):
+def _gravar(audio, opcoes, remover_id3v1=False):
     audio.save(
-        v1=0 if (REMOVER_ID3V1 or remover_id3v1) else 1,   # 0 = apaga o ID3v1; 1 = atualiza se já existir
-        v2_version=VERSAO_ID3,
+        v1=0 if (opcoes.remover_id3v1 or remover_id3v1) else 1,   # 0 = apaga o ID3v1; 1 = atualiza se já existir
+        v2_version=opcoes.versao_id3,
         # No v2.3 o padrão do mutagen junta vários valores com "/" ("AC/DC" vira ambíguo).
         # None usa o separador nulo, que é o que players modernos leem como multivalor.
-        v23_sep=None if MULTIVALOR else "/",
+        v23_sep=None if opcoes.multivalor else "/",
     )
 
 
-def salvar(arquivo, alteracoes, capa=None):
+def salvar(arquivo, alteracoes, capa=None, opcoes=None):
     """
     Grava várias tags (e, opcionalmente, a capa) em um arquivo, num único save.
 
@@ -445,8 +450,10 @@ def salvar(arquivo, alteracoes, capa=None):
       - "" remove a tag
       - VARIOS é ignorado (campo não foi tocado numa edição em lote)
     capa: None (não mexe), ("definir", dados, mime) ou ("remover",)
+    opcoes: OpcoesGravacao (None = padrões)
     Cria o cabeçalho de tags (ID3, Vorbis comment, ilst) só aqui, se o arquivo ainda não tiver um.
     """
+    opcoes = opcoes or OpcoesGravacao()
     fmt = formato(arquivo)
     audio = _abrir(arquivo, fmt)
     if audio.tags is None:
@@ -463,9 +470,9 @@ def salvar(arquivo, alteracoes, capa=None):
             if campo not in CAMPOS or valor == VARIOS:
                 continue
             if fmt == "mp3":
-                _aplicar_campo(audio.tags, campo, valor)
+                _aplicar_campo(audio.tags, campo, valor, opcoes.multivalor)
             else:
-                _MODULOS[fmt].gravar(audio, campo, dividir_valores(campo, valor) if valor else [])
+                _MODULOS[fmt].gravar(audio, campo, dividir_valores(campo, valor, opcoes.multivalor) if valor else [])
     if capa is not None:
         if fmt == "mp3":
             _aplicar_capa(audio.tags, capa)
@@ -473,12 +480,12 @@ def salvar(arquivo, alteracoes, capa=None):
             _MODULOS[fmt].aplicar_capa(audio, capa)
 
     if fmt == "mp3":
-        _gravar(audio)
+        _gravar(audio, opcoes)
     else:
         audio.save()
 
 
-def salvar_varios(arquivos, alteracoes):
+def salvar_varios(arquivos, alteracoes, opcoes=None):
     """
     Aplica as mesmas alterações em vários arquivos.
     Devolve {caminho: mensagem_de_erro} dos que falharam (vazio = tudo certo).
@@ -486,19 +493,19 @@ def salvar_varios(arquivos, alteracoes):
     falhas = {}
     for arquivo in arquivos:
         try:
-            salvar(arquivo, alteracoes)
+            salvar(arquivo, alteracoes, opcoes=opcoes)
         except Exception as erro:   # arquivo somente leitura, em uso, corrompido...
             falhas[Path(arquivo)] = str(erro)
     return falhas
 
 
-def definir_capa(arquivo, dados, mime="image/jpeg"):
+def definir_capa(arquivo, dados, mime="image/jpeg", opcoes=None):
     """Substitui a capa frontal do arquivo pela imagem informada."""
-    salvar(arquivo, {}, capa=("definir", dados, mime))
+    salvar(arquivo, {}, capa=("definir", dados, mime), opcoes=opcoes)
 
 
-def remover_capa(arquivo):
-    salvar(arquivo, {}, capa=("remover",))
+def remover_capa(arquivo, opcoes=None):
+    salvar(arquivo, {}, capa=("remover",), opcoes=opcoes)
 
 
 # ---------------------------------------------------------------------------
@@ -553,8 +560,10 @@ def analisar_extras(arquivo):
     return resultado
 
 
-def limpar_extras(arquivo, id3v1=False, desconhecidos=False, extras=False):
-    """Remove o que foi pedido, num único save. Devolve False se não havia nada a fazer."""
+def limpar_extras(arquivo, id3v1=False, desconhecidos=False, extras=False, opcoes=None):
+    """Remove o que foi pedido, num único save. Devolve False se não havia nada a fazer.
+    opcoes: OpcoesGravacao usada no save do MP3 (None = padrões)."""
+    opcoes = opcoes or OpcoesGravacao()
     fmt = formato(arquivo)
     audio = _abrir(arquivo, fmt)
     if fmt != "mp3":
@@ -579,5 +588,5 @@ def limpar_extras(arquivo, id3v1=False, desconhecidos=False, extras=False):
     if tags is None:
         apagar_id3(arquivo, delete_v1=True, delete_v2=False)   # só havia o ID3v1
     else:
-        _gravar(audio, remover_id3v1=remover_v1)
+        _gravar(audio, opcoes, remover_id3v1=remover_v1)
     return True

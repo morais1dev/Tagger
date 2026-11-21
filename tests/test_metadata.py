@@ -15,19 +15,13 @@ from mutagen.oggvorbis import OggVorbis
 
 from tagger.nucleo import metadata
 from tagger.nucleo.metadata import (
-    VARIOS, analisar_extras, carregar, definir_capa, foi_modificado, formato, ler_capa, limpar_extras,
+    VARIOS, OpcoesGravacao, analisar_extras, carregar, definir_capa, dividir_valores, foi_modificado, formato, ler_capa, limpar_extras,
     listar_audios, remover_capa, salvar, salvar_varios, tem_id3v1, validar_valor, valores_comuns,
 )
 
 JPEG = b"\xff\xd8\xff\xe0" + b"jpeg-falso" * 10
 PNG = b"\x89PNG\r\n\x1a\n" + b"png-falso" * 10
 
-
-@pytest.fixture(autouse=True)
-def config_padrao(monkeypatch):
-    monkeypatch.setattr(metadata, "VERSAO_ID3", 3)
-    monkeypatch.setattr(metadata, "MULTIVALOR", True)
-    monkeypatch.setattr(metadata, "REMOVER_ID3V1", False)
 
 
 def _tags(caminho):
@@ -115,10 +109,34 @@ def test_so_remocoes_nao_cria_cabecalho_vazio(mp3, alteracoes, capa):
     assert mp3.read_bytes() == antes
 
 
-def test_id3v24(mp3, monkeypatch):
-    monkeypatch.setattr(metadata, "VERSAO_ID3", 4)
+def test_opcoes_padrao():
+    assert OpcoesGravacao() == OpcoesGravacao(versao_id3=3, multivalor=True, remover_id3v1=False)
+
+
+def test_id3v23_por_padrao(mp3):
     salvar(mp3, {"title": "A"})
+    assert _tags(mp3).version == (2, 3, 0)
+
+
+def test_id3v24(mp3):
+    salvar(mp3, {"title": "A"}, opcoes=OpcoesGravacao(versao_id3=4))
     assert _tags(mp3).version == (2, 4, 0)
+
+
+def test_versao_id3_vale_em_salvar_varios_e_definir_capa(mp3):
+    opcoes = OpcoesGravacao(versao_id3=4)
+    assert salvar_varios([mp3], {"title": "A"}, opcoes=opcoes) == {}
+    assert _tags(mp3).version == (2, 4, 0)
+    definir_capa(mp3, JPEG, opcoes=OpcoesGravacao(versao_id3=3))
+    assert _tags(mp3).version == (2, 3, 0)
+    remover_capa(mp3, opcoes=opcoes)
+    assert _tags(mp3).version == (2, 4, 0)
+
+
+def test_dividir_valores_com_e_sem_multivalor():
+    assert dividir_valores("artist", "A; B") == ["A", "B"]
+    assert dividir_valores("artist", "A; B", multivalor=False) == ["A; B"]
+    assert dividir_valores("title", "A; B") == ["A; B"]
 
 
 def test_um_unico_save_por_arquivo(mp3, monkeypatch):
@@ -196,10 +214,17 @@ def test_multivalor(mp3):
     assert carregar(mp3).tags["artist"] == "A; B"
 
 
-def test_multivalor_desligado(mp3, monkeypatch):
-    monkeypatch.setattr(metadata, "MULTIVALOR", False)
-    salvar(mp3, {"artist": "A; B"})
+def test_multivalor_desligado(mp3):
+    salvar(mp3, {"artist": "A; B"}, opcoes=OpcoesGravacao(multivalor=False))
     assert _tags(mp3)["TPE1"].text == ["A; B"]
+
+
+def test_multivalor_ligado_no_id3v23_grava_valores_separados(mp3):
+    salvar(mp3, {"artist": "A; B"}, opcoes=OpcoesGravacao(versao_id3=3, multivalor=True))
+    with open(mp3, "rb") as f:
+        conteudo = f.read()
+    assert b"A\x00\x00\x00\xff\xfeB" in conteudo   # dois textos separados por nulo, não "A/B"
+    assert b"A/B" not in conteudo
 
 
 def test_multivalor_sobrevive_ao_salvar_outro_campo(mp3):
@@ -268,13 +293,20 @@ def _com_id3v1(mp3):
         f.write(b"TAG" + b"Titulo v1".ljust(30, b"\0") + bytes(94) + b"\xff")   # 0xFF = sem gênero
 
 
-def test_remover_id3v1_ao_salvar(mp3, monkeypatch):
+def test_remover_id3v1_ao_salvar(mp3):
     _com_id3v1(mp3)
     salvar(mp3, {"title": "A"})
     assert tem_id3v1(mp3)                         # padrão: só atualiza
-    monkeypatch.setattr(metadata, "REMOVER_ID3V1", True)
-    salvar(mp3, {"title": "B"})
+    salvar(mp3, {"title": "B"}, opcoes=OpcoesGravacao(remover_id3v1=True))
     assert not tem_id3v1(mp3)
+
+
+def test_limpar_extras_usa_as_opcoes_no_save(mp3):
+    id3 = ID3()
+    id3.add(TXXX(encoding=3, desc="REPLAYGAIN_TRACK_GAIN", text=["-6 dB"]))
+    id3.save(mp3)
+    assert limpar_extras(mp3, extras=True, opcoes=OpcoesGravacao(versao_id3=4))
+    assert _tags(mp3).version == (2, 4, 0)
 
 
 def test_analisar_e_limpar_extras(mp3):
@@ -379,11 +411,10 @@ def test_outro_salvar_e_reler(outro):
     assert carregar(outro).tags == valores
 
 
-def test_outro_multivalor_nativo(outro, monkeypatch):
+def test_outro_multivalor_nativo(outro):
     salvar(outro, {"artist": "A; B"})
     assert list(_abrir(outro).tags[ARTISTA[outro.suffix]]) == ["A", "B"]
-    monkeypatch.setattr(metadata, "MULTIVALOR", False)
-    salvar(outro, {"artist": "A; B"})
+    salvar(outro, {"artist": "A; B"}, opcoes=OpcoesGravacao(multivalor=False))
     assert list(_abrir(outro).tags[ARTISTA[outro.suffix]]) == ["A; B"]
 
 

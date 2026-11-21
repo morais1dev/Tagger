@@ -51,9 +51,9 @@ Leitura, gravação, validação, padrões de nome, busca online e credenciais v
 
 `metadata.py` declara no topo que só `salvar` e `limpar_extras` gravam. `carregar`, `carregar_varios`, `ler_capa` e `analisar_extras` só leem. Os módulos de `formatos/` também nunca chamam `save()`: a gravação é sempre um único save por arquivo, feito em `salvar` (e em `limpar_extras`).
 
-### 3. Opções de gravação ficam em constantes do módulo `metadata`
+### 3. Opções de gravação são parâmetro (`OpcoesGravacao`)
 
-As opções que afetam a gravação (`VERSAO_ID3`, `MULTIVALOR`, `REMOVER_ID3V1`) são constantes de `metadata.py`, e não parâmetros de `salvar`. A CLI usa os valores padrão de lá. A GUI as ajusta a partir das Configurações em `JanelaPrincipal._aplicar_config_metadata`. `VERSAO_ID3` e `REMOVER_ID3V1` valem só para MP3; `MULTIVALOR` vale para todos os formatos (via `dividir_valores`). Passá-las como parâmetro é uma evolução possível, mas ainda não existe.
+As opções que afetam a gravação (`versao_id3`, `multivalor`, `remover_id3v1`) formam a dataclass `OpcoesGravacao` de `metadata.py`, com os padrões na própria classe. O núcleo não guarda configuração global: `salvar`, `salvar_varios`, `definir_capa`, `remover_capa`, `limpar_extras` e `rascunho.executar_salvamento` recebem `opcoes` (o padrão `None` vale `OpcoesGravacao()`). A CLI usa os padrões. A GUI monta o objeto a partir das Configurações em `JanelaPrincipal.opcoes_gravacao` e o entrega a cada gravação (threads `Salvador` e `Limpador`). `versao_id3` e `remover_id3v1` valem só para MP3; `multivalor` vale para todos os formatos (via `dividir_valores`).
 
 ### 4. Trabalho pesado fora da thread da interface
 
@@ -119,6 +119,6 @@ Regra prática: toda mudança de tag iniciada pelo usuário ou por uma busca dev
 
 1. Em `gui/config.py`, acrescente a chave e o valor padrão em `PADROES`. O tipo do padrão (bool, int, lista) decide a conversão em `carregar_config`; `salvar_config` grava tudo em `QSettings` sob `config/<chave>`.
 2. Em `gui/configuracoes.py`, crie o controle, ligue-o a `_definir("<chave>", valor)` (que emite `mudou` para a prévia ao vivo) e preencha-o ao carregar o estado (onde `ck_multivalor` e similares são preenchidos).
-3. Em `JanelaPrincipal._aplicar_config_pendente` (`gui/janela.py`), aplique o efeito; se a opção afeta a gravação de tags, ajuste também `_aplicar_config_metadata`. Se for aparência, inclua a chave em `CHAVES_APARENCIA`.
+3. Em `JanelaPrincipal._aplicar_config_pendente` (`gui/janela.py`), aplique o efeito; se a opção afeta a gravação de tags, ajuste também `OpcoesGravacao` e `JanelaPrincipal.opcoes_gravacao`. Se for aparência, inclua a chave em `CHAVES_APARENCIA`.
 4. A regra em si fica no núcleo, recebendo o valor por parâmetro quando possível. Se a opção guarda credencial, siga o passo 2 de "Adicionar um serviço online".
 5. Registre mudanças visíveis ao usuário no `CHANGELOG.md`.
