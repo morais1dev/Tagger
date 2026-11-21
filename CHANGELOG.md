@@ -2,11 +2,6 @@
 
 All notable changes to Tagger are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [2.3.0] — Unreleased
-
-### Changed
-- Internal: the write options (ID3 version, multi-value tags, ID3v1 removal) are now passed explicitly to the tag-writing code instead of being global settings. Nothing changes in how Tagger behaves.
-
 ## [2.2.0] — 2026-10-24
 
 ### Added

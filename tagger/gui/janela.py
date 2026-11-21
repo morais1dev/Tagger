@@ -669,7 +669,7 @@ class JanelaPrincipal(QMainWindow):
                               remover_id3v1=bool(c["remover_id3v1"]))
 
     def _aplicar_config_capa(self):
-        self.painel.lado_max_capa = int(c["lado_max_capa"]) if c["otimizar_capa"] else 0
+        self.painel.lado_max_capa = int(self.config["lado_max_capa"]) if self.config["otimizar_capa"] else 0
 
     def abrir_configuracoes(self):
         dialogo = DialogoConfiguracoes(self.config, self)
