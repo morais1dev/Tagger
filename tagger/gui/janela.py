@@ -7,6 +7,8 @@ Executar:  python -m tagger
 import logging
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QSettings, QThread, QTimer, QUrl, Qt, Signal
@@ -16,6 +18,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QProgressBar, QPushButton, QScrollArea, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from tagger.nucleo import atualizacao
 from tagger.nucleo.credenciais import estado_servicos
 from tagger.nucleo.metadata import (
     CAMPOS, OpcoesGravacao, analisar_extras, carregar, carregar_varios, curingas_audio, foi_modificado, formato, limpar_extras,
@@ -113,6 +116,31 @@ class Movedor(QThread):
             log.exception("Erro ao mover arquivos")
             resultado = erro
         self.concluido.emit(resultado)
+
+
+class PonteVerificacao(QObject):
+    """Leva o resultado da consulta de versão da thread de segundo plano para a thread da interface.
+
+    Sem pai de propósito: a thread guarda uma referência a ela, então emitir depois de a janela fechar
+    é seguro (o sinal só não chega a ninguém)."""
+    nova_versao = Signal(str, str)     # versão, link da Release (só emitido se houver versão mais nova)
+
+
+def iniciar_verificacao(ponte):
+    """Consulta a última Release numa thread daemon: fechar o app nunca espera por ela nem a destrói
+    em execução (um QThread filho da janela destruído rodando derruba o processo). Só avisa, nunca
+    baixa nada."""
+    def trabalho():
+        try:
+            achado = atualizacao.consultar()
+            if achado:
+                ponte.nova_versao.emit(*achado)
+        except Exception:
+            log.exception("Erro inesperado na verificação de nova versão")
+
+    thread = threading.Thread(target=trabalho, name="verificar-versao", daemon=True)
+    thread.start()
+    return thread
 
 
 class Limpador(QThread):
@@ -1602,6 +1630,32 @@ class JanelaPrincipal(QMainWindow):
             evento.acceptProposedAction()
             self.carregar_caminhos(caminhos, substituir=not self.modelo.faixas)
 
+    # ------------------------------------------------------------------ nova versão
+    def verificar_atualizacao(self):
+        """Chamado por main() ao abrir: no máximo uma consulta por dia, e só se a opção estiver ligada."""
+        if not self.config["avisar_nova_versao"] or getattr(self, "_verificador", None) is not None:
+            return
+        agora = time.time()
+        if not atualizacao.deve_consultar(self.settings.value("ultima_verificacao_versao"), agora):
+            return
+        self.settings.setValue("ultima_verificacao_versao", agora)      # conta a tentativa, deu certo ou não
+        self._ponte_versao = PonteVerificacao()
+        self._ponte_versao.nova_versao.connect(self._avisar_nova_versao)
+        self._verificador = iniciar_verificacao(self._ponte_versao)
+
+    def _avisar_nova_versao(self, versao, link):
+        if not self.isVisible():          # a janela fechou enquanto a consulta rodava: não abre diálogo
+            return
+        caixa = QMessageBox(self)
+        caixa.setWindowTitle("Nova versão do Tagger")
+        caixa.setIcon(QMessageBox.Information)
+        caixa.setText(f"A versão {versao} do Tagger está disponível (você usa a {__version__}).")
+        abrir = caixa.addButton("Abrir a página da versão", QMessageBox.AcceptRole)
+        caixa.addButton("Agora não", QMessageBox.RejectRole)
+        caixa.exec()
+        if caixa.clickedButton() is abrir:
+            QDesktopServices.openUrl(QUrl(link))
+
     # ------------------------------------------------------------------ fechar
     def closeEvent(self, evento):
         if self._gravando():
@@ -1640,6 +1694,7 @@ def main():
     janela.filtro_janelas = filtro_janelas
     filtro_janelas.aplicar_em_todas(tema.TEMAS.get(janela._tema_atual(), {}).get("escuro", True))
     janela.show()
+    QTimer.singleShot(1500, janela.verificar_atualizacao)      # depois de a janela aparecer
 
     # arquivos/pastas passados na linha de comando (ou arrastados sobre o .exe)
     if len(sys.argv) > 1:

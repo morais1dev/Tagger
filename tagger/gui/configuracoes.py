@@ -211,8 +211,10 @@ class DialogoConfiguracoes(QDialog):
         self.ck_total.toggled.connect(lambda on: self._definir("numerar_com_total", on))
         self.ck_agrupar = QCheckBox("Agrupar a lista por álbum (com mais de um álbum carregado)")
         self.ck_agrupar.toggled.connect(lambda on: self._definir("agrupar_por_album", on))
+        self.ck_atualizacao = QCheckBox("Avisar quando houver uma versão nova do Tagger (consulta o GitHub, no máximo 1x por dia)")
+        self.ck_atualizacao.toggled.connect(lambda on: self._definir("avisar_nova_versao", on))
 
-        for item in (self.ck_subpastas, self.ck_reabrir, self.ck_total, self.ck_agrupar):
+        for item in (self.ck_subpastas, self.ck_reabrir, self.ck_total, self.ck_agrupar, self.ck_atualizacao):
             v.addWidget(item)
         v.addSpacing(8)
         v.addWidget(_rotulo(
@@ -354,6 +356,7 @@ class DialogoConfiguracoes(QDialog):
         self.ck_reabrir.setChecked(c["reabrir_ultima"])
         self.ck_total.setChecked(c["numerar_com_total"])
         self.ck_agrupar.setChecked(c["agrupar_por_album"])
+        self.ck_atualizacao.setChecked(c["avisar_nova_versao"])
         (self.rb_v23 if int(c["versao_id3"]) == 3 else self.rb_v24).setChecked(True)
         self.ck_multivalor.setChecked(c["multivalor"])
         self.ck_id3v1.setChecked(c["remover_id3v1"])
