@@ -20,6 +20,7 @@ Este documento descreve como o código está organizado na v2.2 e como estendê-
 - `formatos/vorbis.py`: FLAC e Ogg (Vorbis, Opus, FLAC no Ogg), via Vorbis comments.
 - `formatos/mp4.py`: M4A/MP4, via átomos do iTunes.
 - `rascunho.py`: classe `Rascunho` (alterações pendentes) e `executar_salvamento` (veja a seção própria).
+- `historico.py`: classe `Historico`, as pilhas de desfazer/refazer e as regras de qual pilha recebe o quê (gravação, falha parcial, renomear/mover, descartar); veja "O histórico de desfazer".
 - `padroes.py`: padrões de nome de arquivo ⇄ tags (`nome_pelas_tags`, `executar_renomeacao`, detecção de conflitos).
 - `organizar.py`: mover arquivos para pastas a partir das tags, reutilizando `padroes.py`.
 - `agrupar.py`: chaves de agrupamento e ordenação por álbum (`chave_grupo`, `chave_ordem`, `ordem_faixa`).
@@ -88,6 +89,14 @@ Carregar pastas, salvar, mover arquivos e limpar extras rodam em subclasses de `
 - Renomear/organizar arquivos **não** passa pelo Rascunho: é a exceção documentada na classe `Renomeacao` (desfazer renomeia de volta na hora). `migrar_historico` corrige os caminhos do histórico depois disso.
 
 Regra prática: toda mudança de tag iniciada pelo usuário ou por uma busca deve virar alteração no Rascunho, nunca uma gravação direta.
+
+## O histórico de desfazer
+
+`tagger/nucleo/historico.py`, classe `Historico`, guarda as pilhas `desfazer` e `refazer` e o `pendente` (um desfazer/refazer de tags ainda não confirmado). Não tem Qt e não toca em arquivos: a janela grava ou move e conta o resultado ao `Historico`, que decide o que fica em cada pilha. Cada item é uma lista de registros de tags (os valores anteriores, vindos de `executar_salvamento`) ou uma `Renomeacao`.
+
+- `registrar_gravacao`: depois de gravar, só os arquivos sem falha entram. Uma gravação nova vai para `desfazer` e limpa `refazer`; a que confirma um desfazer vai para `refazer`; a que confirma um refazer volta para `desfazer`.
+- `retirar` e `preparar`: desfazer/refazer de tags não gravam na hora; o registro vira alteração pendente no `Rascunho` (`Rascunho.aplicar_registros`) e só vale com "Salvar". `descartar_pendente` devolve o item à pilha de onde saiu.
+- `registrar_renomeacao`, `concluir_reversao`, `registrar_movimento_interrompido`: renomear/mover não passa pelo `Rascunho`; desfazer move de volta na hora e o que falhou continua na pilha para nova tentativa. `migrar` ajusta os caminhos das pilhas quando arquivos mudam de nome.
 
 ## Como estender
 
