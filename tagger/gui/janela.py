@@ -7,6 +7,7 @@ Executar:  python -m tagger
 import logging
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -116,14 +117,29 @@ class Movedor(QThread):
         self.concluido.emit(resultado)
 
 
-class Verificador(QThread):
-    """Consulta a última Release fora da thread da interface; só avisa, nunca baixa nada."""
+class PonteVerificacao(QObject):
+    """Leva o resultado da consulta de versão da thread de segundo plano para a thread da interface.
+
+    Sem pai de propósito: a thread guarda uma referência a ela, então emitir depois de a janela fechar
+    é seguro (o sinal só não chega a ninguém)."""
     nova_versao = Signal(str, str)     # versão, link da Release (só emitido se houver versão mais nova)
 
-    def run(self):
-        achado = atualizacao.consultar()
-        if achado:
-            self.nova_versao.emit(*achado)
+
+def iniciar_verificacao(ponte):
+    """Consulta a última Release numa thread daemon: fechar o app nunca espera por ela nem a destrói
+    em execução (um QThread filho da janela destruído rodando derruba o processo). Só avisa, nunca
+    baixa nada."""
+    def trabalho():
+        try:
+            achado = atualizacao.consultar()
+            if achado:
+                ponte.nova_versao.emit(*achado)
+        except Exception:
+            log.exception("Erro inesperado na verificação de nova versão")
+
+    thread = threading.Thread(target=trabalho, name="verificar-versao", daemon=True)
+    thread.start()
+    return thread
 
 
 class Limpador(QThread):
@@ -1620,11 +1636,13 @@ class JanelaPrincipal(QMainWindow):
         if not atualizacao.deve_consultar(self.settings.value("ultima_verificacao_versao"), agora):
             return
         self.settings.setValue("ultima_verificacao_versao", agora)      # conta a tentativa, deu certo ou não
-        self._verificador = Verificador(self)
-        self._verificador.nova_versao.connect(self._avisar_nova_versao)
-        self._verificador.start()
+        self._ponte_versao = PonteVerificacao()
+        self._ponte_versao.nova_versao.connect(self._avisar_nova_versao)
+        self._verificador = iniciar_verificacao(self._ponte_versao)
 
     def _avisar_nova_versao(self, versao, link):
+        if not self.isVisible():          # a janela fechou enquanto a consulta rodava: não abre diálogo
+            return
         caixa = QMessageBox(self)
         caixa.setWindowTitle("Nova versão do Tagger")
         caixa.setIcon(QMessageBox.Information)
@@ -1649,8 +1667,6 @@ class JanelaPrincipal(QMainWindow):
         self.settings.setValue("cabecalho_v4", self.tabela.estado_cabecalho())
         if self._carregador is not None:
             self._carregador.wait(3000)
-        if getattr(self, "_verificador", None) is not None:
-            self._verificador.wait(3000)
         super().closeEvent(evento)
 
 
