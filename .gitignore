@@ -27,3 +27,9 @@ desktop.ini
 
 # Chaves de API (geradas no build pelos Secrets; nunca commitar)
 tagger/nucleo/chaves.json
+
+# App (Tauri + React)
+node_modules/
+dist/
+target/
+app/src-tauri/gen/

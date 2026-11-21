@@ -1,0 +1,22 @@
+[package]
+name = "tagger-app"
+version = "0.0.0"
+edition = "2024"
+
+[lib]
+name = "tagger_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[profile.release]
+# padrão recomendado pela Tauri para instaladores menores
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
