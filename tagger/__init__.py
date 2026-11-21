@@ -1,4 +1,4 @@
-"""Tagger: editor de tags de MP3.
+"""Tagger: editor de tags de áudio (MP3, FLAC, Ogg e M4A).
 
 A versão é definida só aqui: a GUI, a CLI e o build leem daqui."""
 
