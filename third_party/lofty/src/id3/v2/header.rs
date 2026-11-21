@@ -4,7 +4,7 @@ use crate::id3::v2::restrictions::TagRestrictions;
 use crate::id3::v2::util::synchsafe::{SynchsafeInteger, UnsynchronizedStream};
 
 use std::fmt::Display;
-use std::io::Read;
+use std::io::{Read, Take};
 
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 
@@ -154,25 +154,40 @@ impl Id3v2Header {
 				// In ID3v2.3, the extended header is considered separate from the frame header, and
 				// thus subject to unsynchronization
 				Id3v2Version::V3 => {
+					// Tagger: backport de lofty-rs PR #777 (issue #761). O cabeçalho estendido do v2.3
+					// tem layout próprio (flags de 2 bytes, tamanho do padding, CRC opcional) e não
+					// inclui os 4 bytes do tamanho; antes ele era lido com o layout do v2.4.
 					if flags_parsed.unsynchronisation {
 						let mut reader = UnsynchronizedStream::new(bytes);
 						extended_size = reader.read_u32::<BigEndian>()?;
-						read_extended_header(&mut reader, &mut flags_parsed, extended_size)?;
+						read_extended_header_v3(
+							&mut reader.by_ref().take(u64::from(extended_size)),
+							&mut flags_parsed,
+							extended_size,
+						)?;
 					} else {
 						extended_size = bytes.read_u32::<BigEndian>()?;
-						read_extended_header(bytes, &mut flags_parsed, extended_size)?;
+						read_extended_header_v3(
+							&mut bytes.by_ref().take(u64::from(extended_size)),
+							&mut flags_parsed,
+							extended_size,
+						)?;
 					}
 				},
 				// In ID3v2.4, they seem to be considered one big header (?) so no flags apply to it
 				Id3v2Version::V4 => {
 					extended_size = bytes.read_u32::<BigEndian>()?.unsynch();
-					read_extended_header(bytes, &mut flags_parsed, extended_size)?;
+					read_extended_header_v4(
+						&mut bytes.by_ref().take(u64::from(extended_size)),
+						&mut flags_parsed,
+						extended_size,
+					)?;
 				},
 				_ => unreachable!(),
 			}
 		}
 
-		if extended_size > 0 && extended_size >= size {
+		if extended_size > 0 && extended_size > size {
 			return Err(Id3v2HeaderError::BadExtendedHeaderSize.into());
 		}
 
@@ -190,21 +205,56 @@ impl Id3v2Header {
 	}
 }
 
-fn read_extended_header<R: Read>(
-	reader: &mut R,
+// Tagger: backport de lofty-rs PR #777 (issue #761), sem o modo estrito: flags desconhecidas
+// e bytes que sobrarem no cabeçalho estendido são descartados (o comportamento "relaxed" do upstream).
+fn read_extended_header_v3<R: Read>(
+	reader: &mut Take<R>,
 	flags: &mut Id3v2TagFlags,
 	header_size: u32,
 ) -> Result<(), Id3v2ParseError> {
-	if header_size < 6 {
+	// o v2.3 só define uma flag
+	const CRC_DATA_PRESENT: u16 = 0b1000_0000_0000_0000;
+
+	if header_size != 6 && header_size != 10 {
 		return Err(Id3v2HeaderError::BadExtendedHeaderSize.into());
 	}
+
+	let extended_flags = reader.read_u16::<BigEndian>()?;
+
+	// o tamanho do padding não é confiável; o parser de frames para sozinho no padding
+	let _size_of_padding = reader.read_u32::<BigEndian>()?;
+
+	if extended_flags & CRC_DATA_PRESENT != 0 {
+		flags.crc = true;
+
+		// o CRC existente não interessa
+		let _crc = reader.read_u32::<BigEndian>()?;
+	}
+
+	descartar_resto(reader)
+}
+
+fn read_extended_header_v4<R: Read>(
+	reader: &mut Take<R>,
+	flags: &mut Id3v2TagFlags,
+	header_size: u32,
+) -> Result<(), Id3v2ParseError> {
+	if !(6..=15).contains(&header_size) {
+		return Err(Id3v2HeaderError::BadExtendedHeaderSize.into());
+	}
+
+	// no v2.4 o tamanho do cabeçalho estendido inclui ele mesmo
+	reader.set_limit(u64::from(header_size - 4));
 
 	// Useless byte since there's only 1 byte for flags
 	let _num_flag_bytes = reader.read_u8()?;
 
 	let extended_flags = reader.read_u8()?;
 
-	// The only flags we care about here are the CRC and restrictions
+	// Update flag, just skip it
+	if extended_flags & 0x40 == 0x40 {
+		let _data_length = reader.read_u8()?;
+	}
 
 	if extended_flags & 0x20 == 0x20 {
 		flags.crc = true;
@@ -221,5 +271,14 @@ fn read_extended_header<R: Read>(
 		flags.restrictions = Some(TagRestrictions::from_byte(reader.read_u8()?));
 	}
 
+	descartar_resto(reader)
+}
+
+/// Flags desconhecidas podem trazer dados: o que sobrar do cabeçalho estendido é descartado.
+fn descartar_resto<R: Read>(reader: &mut Take<R>) -> Result<(), Id3v2ParseError> {
+	if reader.limit() != 0 {
+		log::warn!("encountered unknown flags in the extended header");
+		std::io::copy(reader, &mut std::io::sink())?;
+	}
 	Ok(())
 }
