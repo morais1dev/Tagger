@@ -16,10 +16,9 @@ from PySide6.QtWidgets import (
     QMessageBox, QProgressBar, QPushButton, QScrollArea, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from tagger.nucleo import metadata
 from tagger.nucleo.credenciais import estado_servicos
 from tagger.nucleo.metadata import (
-    CAMPOS, analisar_extras, carregar, carregar_varios, curingas_audio, foi_modificado, formato, limpar_extras,
+    CAMPOS, OpcoesGravacao, analisar_extras, carregar, carregar_varios, curingas_audio, foi_modificado, formato, limpar_extras,
     listar_audios, mtime_atual, nomes_formatos, rotulo, validar_valor,
 )
 from tagger.nucleo.organizar import (
@@ -83,15 +82,16 @@ class Salvador(QThread):
     progresso = Signal(int, int)
     concluido = Signal(object)         # (registros, falhas, faixas)
 
-    def __init__(self, trabalhos, mtimes, parent=None):
+    def __init__(self, trabalhos, mtimes, opcoes, parent=None):
         super().__init__(parent)
         self.trabalhos = trabalhos
         self.mtimes = mtimes
+        self.opcoes_gravacao = opcoes
 
     def run(self):
         try:
             resultado = executar_salvamento(self.trabalhos, lambda i, total: self.progresso.emit(i, total),
-                                            self.mtimes)
+                                            self.mtimes, self.opcoes_gravacao)
         except Exception:
             log.exception("Erro ao salvar")
             resultado = ([], {t[0]: "erro inesperado (detalhes no tagger.log)" for t in self.trabalhos}, [])
@@ -119,10 +119,11 @@ class Limpador(QThread):
     progresso = Signal(int, int)
     concluido = Signal(object)         # (limpos, falhas, faixas relidas)
 
-    def __init__(self, caminhos, opcoes, parent=None):
+    def __init__(self, caminhos, opcoes, opcoes_gravacao, parent=None):
         super().__init__(parent)
         self.caminhos = caminhos
         self.opcoes = opcoes
+        self.opcoes_gravacao = opcoes_gravacao
 
     def run(self):
         limpos, falhas, relidas = 0, {}, []
@@ -130,7 +131,7 @@ class Limpador(QThread):
         try:
             for i, caminho in enumerate(self.caminhos, start=1):
                 try:
-                    limpos += bool(limpar_extras(caminho, **self.opcoes))
+                    limpos += bool(limpar_extras(caminho, opcoes=self.opcoes_gravacao, **self.opcoes))
                 except Exception as erro:
                     log.warning("Não limpou %s: %s", caminho, erro)
                     falhas[caminho] = str(erro)
@@ -294,7 +295,7 @@ class JanelaPrincipal(QMainWindow):
 
         self._criar_barra_status()
         self._criar_acoes()
-        self._aplicar_config_metadata()
+        self._aplicar_config_capa()
 
         self.tela_vazia.definir_recentes(self._recentes())
         self.tela_vazia.definir_subpastas(self.config["subpastas"])
@@ -652,7 +653,7 @@ class JanelaPrincipal(QMainWindow):
         anterior = self.config
         self.config = self._config_pendente
         self._config_pendente = None
-        self._aplicar_config_metadata()
+        self._aplicar_config_capa()
         self._atualizar_formato()
         if any(anterior.get(k) != self.config.get(k) for k in CHAVES_APARENCIA):
             self.aplicar_tema()
@@ -661,12 +662,13 @@ class JanelaPrincipal(QMainWindow):
         self.tela_vazia.definir_subpastas(self.config["subpastas"])
         self.tabela.definir_agrupar(self.config["agrupar_por_album"])
 
-    def _aplicar_config_metadata(self):
-        """Opções de gravação ficam no módulo metadata (a CLI usa os padrões de lá)."""
+    def opcoes_gravacao(self):
+        """Opções de gravação das Configurações, passadas ao núcleo a cada gravação."""
         c = self.config
-        metadata.VERSAO_ID3 = int(c["versao_id3"])
-        metadata.MULTIVALOR = bool(c["multivalor"])
-        metadata.REMOVER_ID3V1 = bool(c["remover_id3v1"])
+        return OpcoesGravacao(versao_id3=int(c["versao_id3"]), multivalor=bool(c["multivalor"]),
+                              remover_id3v1=bool(c["remover_id3v1"]))
+
+    def _aplicar_config_capa(self):
         self.painel.lado_max_capa = int(c["lado_max_capa"]) if c["otimizar_capa"] else 0
 
     def abrir_configuracoes(self):
@@ -868,7 +870,7 @@ class JanelaPrincipal(QMainWindow):
         if sincrono:
             QApplication.setOverrideCursor(Qt.WaitCursor)
             try:
-                resultado = executar_salvamento(trabalhos, mtimes=mtimes)
+                resultado = executar_salvamento(trabalhos, mtimes=mtimes, opcoes=self.opcoes_gravacao())
             finally:
                 QApplication.restoreOverrideCursor()
             self._ao_salvar(resultado)
@@ -881,7 +883,7 @@ class JanelaPrincipal(QMainWindow):
         self._bloquear(True)
         self.lbl_status.setText(f"Salvando {len(trabalhos)} arquivos…")
         self._mostrar_progresso(0, len(trabalhos))
-        self._salvador = Salvador(trabalhos, mtimes, self)
+        self._salvador = Salvador(trabalhos, mtimes, self.opcoes_gravacao(), self)
         self._salvador.progresso.connect(self._ao_progresso_salvar)
         self._salvador.concluido.connect(self._ao_salvar)
         self._salvador.finished.connect(self._salvador.deleteLater)
@@ -1374,7 +1376,7 @@ class JanelaPrincipal(QMainWindow):
         self._bloquear(True)
         self.lbl_status.setText(f"Limpando {len(caminhos)} arquivos…")
         self._mostrar_progresso(0, len(caminhos))
-        self._limpador = Limpador(caminhos, dialogo.opcoes(), self)
+        self._limpador = Limpador(caminhos, dialogo.opcoes(), self.opcoes_gravacao(), self)
         self._limpador.progresso.connect(self._ao_progresso_limpar)
         self._limpador.concluido.connect(self._ao_limpar)
         self._limpador.finished.connect(self._limpador.deleteLater)
@@ -1456,9 +1458,9 @@ class JanelaPrincipal(QMainWindow):
             texto = "Vários formatos"
         elif formatos:
             fmt = formatos.pop()
-            texto = f"{fmt.upper()} · {ROTULO_TAGS[fmt](metadata.VERSAO_ID3) if fmt == 'mp3' else ROTULO_TAGS[fmt]}"
+            texto = f"{fmt.upper()} · {ROTULO_TAGS[fmt](int(self.config['versao_id3'])) if fmt == 'mp3' else ROTULO_TAGS[fmt]}"
         else:
-            texto = f"MP3 · ID3v2.{metadata.VERSAO_ID3}"
+            texto = f"MP3 · ID3v2.{int(self.config['versao_id3'])}"
         self.lbl_formato.setText(texto)
 
     def _atualizar_estado(self):

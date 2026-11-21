@@ -2,19 +2,16 @@ import os
 
 import pytest
 
+from mutagen.mp3 import MP3
+
 from tagger.nucleo import metadata
-from tagger.nucleo.metadata import VARIOS, carregar, ler_capa, salvar
+from tagger.nucleo.metadata import VARIOS, OpcoesGravacao, carregar, ler_capa, salvar
 from tagger.nucleo.rascunho import (
     FALTA, SEM_CAPA, Rascunho, Renomeacao, executar_salvamento, migrar_historico,
 )
 
 JPEG = b"\xff\xd8\xff\xe0" + b"jpeg-falso" * 10
 
-
-@pytest.fixture(autouse=True)
-def config_padrao(monkeypatch):
-    monkeypatch.setattr(metadata, "VERSAO_ID3", 3)
-    monkeypatch.setattr(metadata, "MULTIVALOR", True)
 
 
 @pytest.fixture
@@ -30,6 +27,16 @@ def _salvar(rascunho, faixas):
     resultado = executar_salvamento(rascunho.trabalhos(), mtimes=mtimes)
     rascunho.descartar()
     return resultado
+
+
+def test_salvamento_usa_as_opcoes_de_gravacao(faixas):
+    r = Rascunho()
+    r.definir(faixas, "artist", "A; B")
+    _registros, falhas, _ = executar_salvamento(r.trabalhos(), opcoes=OpcoesGravacao(versao_id3=4, multivalor=False))
+    assert not falhas
+    for faixa in faixas:
+        tags = MP3(faixa.caminho).tags
+        assert tags.version == (2, 4, 0) and tags["TPE1"].text == ["A; B"]
 
 
 def test_definir_e_valor(faixas):
