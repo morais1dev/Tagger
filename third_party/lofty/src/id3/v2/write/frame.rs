@@ -170,6 +170,15 @@ where
 					continue;
 				};
 
+				// Tagger (patch): gêneros só por nome (sem códigos numéricos do ID3v1) ficam
+				// separados por nulo, como o mutagen grava e os players modernos leem.
+				if f.value.contains('\0') && f.value.split('\0').all(|g| g.parse::<u8>().is_err() && g != "RX" && g != "CR") {
+					if let Some(value) = frame.as_bytes(&mut ctx)? {
+						write_frame(writer, frame.id().as_str(), frame.flags(), &value, write_options)?;
+					}
+					continue;
+				}
+
 				let mut new_genre_string = String::new();
 				let genres = GenresIter::new(&f.value, true).collect::<Vec<_>>();
 				for (i, genre) in genres.iter().enumerate() {
