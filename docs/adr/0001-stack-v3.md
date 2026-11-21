@@ -26,7 +26,7 @@ O spike T2.1 montou um app mínimo em Tauri 2 + React + TypeScript com o núcleo
 
 1. **Desktop com Tauri 2.** A interface é em **React + TypeScript** e o núcleo em **Rust**. Toda a regra de negócio fica no núcleo, sem dependência da interface, como na v2 (`docs/ARQUITETURA.md`, decisão 1). Os comandos do Tauri só traduzem as chamadas da interface para o núcleo.
 2. **Tags com a crate lofty**, editando pelo tipo concreto de cada formato: `Id3v2Tag`, `VorbisComments` e `Ilst`. O `Tag` genérico da lofty não é usado para gravar, porque descarta o que não sabe mapear.
-3. **MP3 mantém ID3v2.3 como padrão**, igual à v2. A gravação usa a lofty com o patch de 9 linhas no `TCON` (`create_items_v3`), aplicado via `[patch.crates-io]` apontando para um fork. O patch é proposto à lofty como pull request. O ID3v2.4 continua disponível como opção de gravação, como na v2.
+3. **MP3 mantém ID3v2.3 como padrão**, igual à v2. A gravação usa a lofty com o patch de 9 linhas no `TCON` (`create_items_v3`), aplicado via `[patch.crates-io]` (onde a cópia corrigida fica é ponto em aberto). O patch é proposto à lofty como pull request. O ID3v2.4 continua disponível como opção de gravação, como na v2.
 4. **O contorno do `TDRC` continua:** a leitura do MP3 usa `implicit_conversions(false)`.
 5. **Android fica para depois**, na fase 4. O núcleo em Rust é o que se pretende reaproveitar lá; esta ADR não decide a interface Android.
 
@@ -34,7 +34,7 @@ O spike T2.1 montou um app mínimo em Tauri 2 + React + TypeScript com o núcleo
 
 - O núcleo da v3 é reescrito em Rust, e a v2 (Python) segue como referência de comportamento. A comparação com a v2 (`comparar_v2.py`, ou uma equivalente) vira o critério de aceite do núcleo.
 - Instalador da ordem de 1–2 MiB, usando o WebView2 do Windows (o NSIS baixa o bootstrapper se faltar).
-- Passamos a depender de um fork da lofty até o patch entrar upstream. Cada atualização da lofty exige reaplicar o patch e rodar de novo os testes de regressão.
+- Passamos a depender de uma lofty corrigida (fork ou patch aplicado por script) até o patch entrar upstream. Cada atualização da lofty exige reaplicar o patch e rodar de novo os testes de regressão.
 - O núcleo precisa de código próprio onde a lofty não cobre a semântica da v2. Isso inclui o mapa de campos por formato, a regra da capa frontal e a troca só dela, e as imagens do FLAC em dois lugares. A lista está em [docs/spike/tauri.md](../spike/tauri.md), seção "O que precisou de código próprio".
 - Dois toolchains, Rust (cargo) e Node (npm), no desenvolvimento e na CI.
 - O build release é lento (~5 min limpo, ~2 min incremental, por causa do LTO). O ciclo de desenvolvimento usa o build de debug (11 s incremental).
@@ -47,14 +47,27 @@ O spike T2.1 montou um app mínimo em Tauri 2 + React + TypeScript com o núcleo
 
 ## Em aberto
 
-- **Manter o fork até o upstream aceitar.** Falta decidir onde o fork fica (repositório próprio ou patch dentro deste repo, aplicado por script como no spike), fixar a versão da lofty (`=0.25.5` + o patch), e quem revisa cada atualização. Também falta definir o que fazer se o upstream recusar o patch ou resolver de outro jeito.
+- **Manter a lofty corrigida até o upstream aceitar.** Falta decidir onde fica a cópia corrigida: um fork em repositório próprio, ou o patch dentro deste repo aplicado por script, como no spike. Falta também definir quem revisa cada atualização e o que fazer se o upstream recusar o patch ou resolver de outro jeito.
+- **Versão da lofty.** Fixar `=0.25.5` (a versão do spike) mantém o bug [lofty-rs #761](https://github.com/Serial-ATA/lofty-rs/issues/761): na 0.25.5, o cabeçalho estendido de uma tag ID3v2.3 é lido com o layout do v2.4, nenhum frame é lido e gravar deixa só o que o app definiu. É outra perda de dados em v2.3, além das duas do spike. A correção está no [PR #777](https://github.com/Serial-ATA/lofty-rs/pull/777) (milestone 0.26.0). Opções:
+  - ir para a 0.26 e rebasear o patch do `TCON` sobre ela;
+  - ficar na 0.25.5 e trazer a correção do #777 para a cópia corrigida.
+
+  Em qualquer caso, entra um teste de regressão com cabeçalho estendido v2.3.
+- **Alcance do patch do `TCON`.** O patch só mantém os gêneros separados por nulo quando nenhum valor é código numérico do ID3v1 nem `RX`/`CR`. Fora disso, cai no caminho original da lofty: `Rock; 80` vira o texto `(Rock)(80)`, que o mutagen lê como um gênero só, literal. Falta decidir entre aceitar essa limitação (gênero numérico é raro e vem do ID3v1) ou ampliar o patch. Em qualquer caso, o caso precisa de teste de regressão.
 - **PR upstream.** Falta abrir o PR com o patch do `TCON` na lofty e registrar também o problema do `TDRC` na leitura (issue). O spike não encontrou nada aberto sobre nenhum dos dois; links relacionados estão em [docs/spike/tauri.md](../spike/tauri.md).
 - **Testes de regressão no núcleo da v3.** Os testes precisam cobrir:
   - gênero multivalor que sobrevive a uma gravação em v2.3;
   - `TDRC` com data completa em tag v2.3 que sobrevive a ler e gravar;
-  - `TYER`/`TDAT` de um v2.3 padrão intactos.
+  - `TYER`/`TDAT` de um v2.3 padrão intactos;
+  - tag v2.3 com cabeçalho estendido (#761);
+  - gênero com código numérico, conforme a decisão sobre o alcance do patch.
 
   Falta decidir se a comparação com a v2 roda na CI (ela depende de Python + mutagen).
 - **Interação do app sem teste automático.** O spike só conferiu que a janela abre. Falta escolher como testar a interface: testes de componentes React e/ou testes ponta a ponta com o WebDriver do Tauri.
 - **Tempo de build release (~5 min).** Falta avaliar se é aceitável na CI, ou se convém cache do `target/`, ou um perfil sem LTO para builds de teste.
-- **Formatos e campos fora do spike.** O spike cobriu título, artista, faixa, gravadora e capa em MP3, FLAC e M4A. Faltam o Ogg/Opus e os demais campos da v2 (álbum, artista do álbum, disco, ano, gênero, compositor, letrista, comentário, letra), além da limpeza de extras.
+- **Formatos e funções fora do spike.** O spike cobriu título, artista, faixa, gravadora e capa (definir) em `.mp3`, `.flac` e `.m4a`. Para chegar ao que a v2 faz (`tagger/nucleo/metadata.py` e `formatos/`), faltam:
+  - **Formatos:** `.ogg` nas três variantes que a v2 abre (Vorbis, Opus e FLAC dentro do Ogg) e `.mp4`.
+  - **Campos:** álbum, artista do álbum, disco, ano, gênero, compositor, letrista, comentário e letra.
+  - **Capa:** remover a capa, não só definir.
+  - **Opções de gravação (`OpcoesGravacao`):** `remover_id3v1` e `multivalor` desligado. O spike só tem a versão do ID3 e o multivalor sempre ligado.
+  - **Limpeza de extras:** `analisar_extras` e `limpar_extras`, ou seja, ID3v1, frames desconhecidos e chaves que o Tagger não mostra.
