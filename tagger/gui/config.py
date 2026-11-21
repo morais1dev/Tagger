@@ -14,6 +14,7 @@ PADROES = {
     "subpastas": True,
     "reabrir_ultima": False,
     "numerar_com_total": True,
+    "avisar_nova_versao": True,  # consulta a última Release no GitHub (no máximo 1x por dia) e só avisa
     "agrupar_por_album": False,  # desligado: a lista continua na ordem de carga, como sempre foi
     # tags
     "versao_id3": 3,             # só MP3 (FLAC/Ogg/M4A não usam ID3)

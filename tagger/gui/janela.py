@@ -7,6 +7,7 @@ Executar:  python -m tagger
 import logging
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QSettings, QThread, QTimer, QUrl, Qt, Signal
@@ -16,7 +17,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QProgressBar, QPushButton, QScrollArea, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from tagger.nucleo import metadata
+from tagger.nucleo import atualizacao, metadata
 from tagger.nucleo.credenciais import estado_servicos
 from tagger.nucleo.metadata import (
     CAMPOS, analisar_extras, carregar, carregar_varios, curingas_audio, foi_modificado, formato, limpar_extras,
@@ -113,6 +114,16 @@ class Movedor(QThread):
             log.exception("Erro ao mover arquivos")
             resultado = erro
         self.concluido.emit(resultado)
+
+
+class Verificador(QThread):
+    """Consulta a última Release fora da thread da interface; só avisa, nunca baixa nada."""
+    nova_versao = Signal(str, str)     # versão, link da Release (só emitido se houver versão mais nova)
+
+    def run(self):
+        achado = atualizacao.consultar()
+        if achado:
+            self.nova_versao.emit(*achado)
 
 
 class Limpador(QThread):
@@ -1600,6 +1611,30 @@ class JanelaPrincipal(QMainWindow):
             evento.acceptProposedAction()
             self.carregar_caminhos(caminhos, substituir=not self.modelo.faixas)
 
+    # ------------------------------------------------------------------ nova versão
+    def verificar_atualizacao(self):
+        """Chamado por main() ao abrir: no máximo uma consulta por dia, e só se a opção estiver ligada."""
+        if not self.config["avisar_nova_versao"] or getattr(self, "_verificador", None) is not None:
+            return
+        agora = time.time()
+        if not atualizacao.deve_consultar(self.settings.value("ultima_verificacao_versao"), agora):
+            return
+        self.settings.setValue("ultima_verificacao_versao", agora)      # conta a tentativa, deu certo ou não
+        self._verificador = Verificador(self)
+        self._verificador.nova_versao.connect(self._avisar_nova_versao)
+        self._verificador.start()
+
+    def _avisar_nova_versao(self, versao, link):
+        caixa = QMessageBox(self)
+        caixa.setWindowTitle("Nova versão do Tagger")
+        caixa.setIcon(QMessageBox.Information)
+        caixa.setText(f"A versão {versao} do Tagger está disponível (você usa a {__version__}).")
+        abrir = caixa.addButton("Abrir a página da versão", QMessageBox.AcceptRole)
+        caixa.addButton("Agora não", QMessageBox.RejectRole)
+        caixa.exec()
+        if caixa.clickedButton() is abrir:
+            QDesktopServices.openUrl(QUrl(link))
+
     # ------------------------------------------------------------------ fechar
     def closeEvent(self, evento):
         if self._gravando():
@@ -1614,6 +1649,8 @@ class JanelaPrincipal(QMainWindow):
         self.settings.setValue("cabecalho_v4", self.tabela.estado_cabecalho())
         if self._carregador is not None:
             self._carregador.wait(3000)
+        if getattr(self, "_verificador", None) is not None:
+            self._verificador.wait(3000)
         super().closeEvent(evento)
 
 
@@ -1638,6 +1675,7 @@ def main():
     janela.filtro_janelas = filtro_janelas
     filtro_janelas.aplicar_em_todas(tema.TEMAS.get(janela._tema_atual(), {}).get("escuro", True))
     janela.show()
+    QTimer.singleShot(1500, janela.verificar_atualizacao)      # depois de a janela aparecer
 
     # arquivos/pastas passados na linha de comando (ou arrastados sobre o .exe)
     if len(sys.argv) > 1:
