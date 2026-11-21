@@ -225,7 +225,7 @@ class FiltroJanelas(QObject):
 # ============================================================================
 
 class JanelaPrincipal(QMainWindow):
-    # {"lastfm"/"discogs": EstadoServico} sempre que as Configurações são salvas (botões da busca online)
+    # {"discogs": EstadoServico} sempre que as Configurações são salvas (botões da busca online)
     servicos_mudaram = Signal(dict)
 
     def __init__(self):
@@ -362,7 +362,7 @@ class JanelaPrincipal(QMainWindow):
         self.btn_adicionar.setAccessibleName("Adicionar arquivos")
         self.btn_adicionar.clicked.connect(lambda: self.adicionar_arquivos())
         self.btn_online = QPushButton("Buscar online")
-        self.btn_online.setToolTip("Buscar tags online das faixas selecionadas: MusicBrainz, Discogs ou Last.fm (Ctrl+Shift+M)")
+        self.btn_online.setToolTip("Buscar tags online das faixas selecionadas: MusicBrainz ou Discogs (Ctrl+Shift+M)")
         self.btn_online.setAccessibleName("Buscar online")
         self.btn_online.clicked.connect(lambda: self.buscar_tags_online())
         h.addWidget(self.btn_abrir)
@@ -684,7 +684,7 @@ class JanelaPrincipal(QMainWindow):
             self.servicos_mudaram.emit(self.estado_servicos())
 
     def estado_servicos(self):
-        """Last.fm/Discogs disponíveis com as Configurações atuais, e a dica para quando não estão."""
+        """Discogs disponível com as Configurações atuais, e a dica para quando não estão."""
         return estado_servicos(self.config)
 
     def alternar_tema(self):

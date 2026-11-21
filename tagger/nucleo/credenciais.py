@@ -1,10 +1,10 @@
 """
-Credenciais das APIs online (Last.fm e Discogs) e limpeza delas em textos de log/erro.
+Credenciais das APIs online (Discogs) e limpeza delas em textos de log/erro.
 
 Sem Qt e sem estado global: o valor que o usuário colou nas Configurações entra por parâmetro.
 Cada credencial é procurada nesta ordem:
 1. valor das Configurações (se não estiver vazio);
-2. variável de ambiente (TAGGER_LASTFM_API_KEY, TAGGER_DISCOGS_KEY, TAGGER_DISCOGS_SECRET, TAGGER_DISCOGS_TOKEN);
+2. variável de ambiente (TAGGER_DISCOGS_KEY, TAGGER_DISCOGS_SECRET, TAGGER_DISCOGS_TOKEN);
 3. chaves.json embutido (gerado no build pelos Secrets do GitHub; fora do git);
 4. nada: None (a busca daquele serviço fica desativada).
 
@@ -25,12 +25,11 @@ log = logging.getLogger(__name__)
 
 ARQUIVO = "chaves.json"
 VARIAVEIS = {
-    "lastfm_api_key": "TAGGER_LASTFM_API_KEY",
     "discogs_key": "TAGGER_DISCOGS_KEY",
     "discogs_secret": "TAGGER_DISCOGS_SECRET",
     "discogs_token": "TAGGER_DISCOGS_TOKEN",
 }
-EMBUTIDAS = ("lastfm_api_key", "discogs_key", "discogs_secret")
+EMBUTIDAS = ("discogs_key", "discogs_secret")
 OCULTO = "***"
 TAMANHO_MINIMO = 16       # credenciais literais menores que isso não são trocadas (lixo curto colado estragaria o log)
 
@@ -100,12 +99,6 @@ def _do_ambiente(nome, ambiente=None):
     return _limpo((os.environ if ambiente is None else ambiente).get(VARIAVEIS[nome]))
 
 
-def lastfm_api_key(valor_config, pasta=None, ambiente=None):
-    """API key do Last.fm (Configurações > ambiente > chaves.json), ou None."""
-    return (_limpo(valor_config) or _do_ambiente("lastfm_api_key", ambiente)
-            or ler_embutidas(pasta).get("lastfm_api_key"))
-
-
 def discogs_authorization(token_usuario, pasta=None, ambiente=None):
     """Valor pronto do cabeçalho Authorization do Discogs, ou None (busca desativada).
 
@@ -124,19 +117,13 @@ def discogs_authorization(token_usuario, pasta=None, ambiente=None):
     return None
 
 
-def lastfm_disponivel(valor_config, pasta=None, ambiente=None):
-    return lastfm_api_key(valor_config, pasta, ambiente) is not None
-
-
 def discogs_disponivel(token_usuario, pasta=None, ambiente=None):
     return discogs_authorization(token_usuario, pasta, ambiente) is not None
 
 
 # chaves das Configurações (gui/config.py: PADROES) que guardam credenciais coladas pelo usuário
-CHAVES_CONFIG = ("lastfm_api_key", "discogs_token")
+CHAVES_CONFIG = ("discogs_token",)
 DICAS = {
-    "lastfm": "Busca no Last.fm indisponível: falta a chave da API. "
-              "Cole a sua em Configurações → Serviços online.",
     "discogs": "Busca no Discogs indisponível: faltam as credenciais. "
                "Cole o seu token pessoal em Configurações → Serviços online.",
 }
@@ -149,10 +136,9 @@ class EstadoServico:
 
 
 def estado_servicos(config, pasta=None, ambiente=None):
-    """{"lastfm": EstadoServico, "discogs": EstadoServico} a partir do dicionário das Configurações."""
+    """{"discogs": EstadoServico} a partir do dicionário das Configurações."""
     config = config or {}
     disponivel = {
-        "lastfm": lastfm_disponivel(config.get("lastfm_api_key"), pasta, ambiente),
         "discogs": discogs_disponivel(config.get("discogs_token"), pasta, ambiente),
     }
     return {nome: EstadoServico(ok, None if ok else DICAS[nome]) for nome, ok in disponivel.items()}
@@ -174,7 +160,7 @@ def credenciais_conhecidas(extras=(), pasta=None, ambiente=None):
 
 # nome=valor / nome: valor / "nome": "valor" para api_key (também api%5Fkey), token, key e secret:
 # em URLs (inclusive já codificadas, ...%3Dvalor%26...), cabeçalhos "Discogs key=..., secret=...",
-# dicionários e JSON. Antes do nome pode vir _ (lastfm_api_key, TAGGER_DISCOGS_TOKEN), mas não letra
+# dicionários e JSON. Antes do nome pode vir _ (discogs_key, TAGGER_DISCOGS_TOKEN), mas não letra
 # ou dígito ("monkey=" fica como está), exceto logo depois de %26 (&) ou %3F (?) numa URL codificada.
 # Os espaços em volta do = ou : não atravessam quebra de linha.
 _RE_PAR = re.compile(

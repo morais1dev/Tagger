@@ -1,7 +1,7 @@
 """
 Gera tagger/nucleo/chaves.json a partir das variáveis de ambiente (Secrets do GitHub Actions).
 
-    LASTFM_API_KEY=... DISCOGS_KEY=... DISCOGS_SECRET=... python scripts/gerar_chaves.py
+    DISCOGS_KEY=... DISCOGS_SECRET=... python scripts/gerar_chaves.py
 
 Variável vazia vira aviso do Actions (::warning::), sem falhar o build: o serviço só fica
 desativado no .exe. Os valores nunca são impressos.
@@ -15,7 +15,6 @@ from pathlib import Path
 DESTINO = Path(__file__).resolve().parent.parent / "tagger" / "nucleo" / "chaves.json"
 # chave no chaves.json -> (variável de ambiente, o que fica sem ela)
 CHAVES = {
-    "lastfm_api_key": ("LASTFM_API_KEY", "a busca no Last.fm"),
     "discogs_key": ("DISCOGS_KEY", "a busca no Discogs (sem token do usuário)"),
     "discogs_secret": ("DISCOGS_SECRET", "a busca no Discogs (sem token do usuário)"),
 }

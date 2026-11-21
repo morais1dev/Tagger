@@ -1,4 +1,4 @@
-"""Janela "Buscar tags online": MusicBrainz, Discogs ou Last.fm, com prévia antes/depois.
+"""Janela "Buscar tags online": MusicBrainz ou Discogs, com prévia antes/depois.
 
 Uso (igual ao DialogoBusca antigo, o resultado é o mesmo busca.Resultado):
     dlg = DialogoBuscaOnline(faixas, parent, valor=rascunho.valor, config=config, estados=estado_servicos(config))
@@ -8,20 +8,19 @@ Uso (igual ao DialogoBusca antigo, o resultado é o mesmo busca.Resultado):
         if resultado.capa:
             rascunho.definir_capa(resultado.caminhos_capa, resultado.acao_capa)
 
-`config` = as Configurações (lastfm_api_key, discogs_token); vazias = chave embutida ou variável de
+`config` = as Configurações (discogs_token); vazio = chave embutida ou variável de
 ambiente (credenciais.py). `estados` = credenciais.estado_servicos(config): serviço indisponível fica
 com o botão desabilitado e a dica que vem de lá.
 
 Regras: a rede roda fora da thread da GUI; mensagens de erro passam por ocultar_credenciais;
-capa só do Cover Art Archive (só a fonte MusicBrainz oferece capa); atribuições do Last.fm e do
-Discogs ficam visíveis ao lado dos dados, com links validados por online.url_segura.
+capa só do Cover Art Archive (só a fonte MusicBrainz oferece capa); atribuição do
+Discogs fica visíveis ao lado dos dados, com links validados por online.url_segura.
 """
 
 import html
 import logging
-from pathlib import Path
 
-from PySide6.QtCore import QStandardPaths, Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QCheckBox, QDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QPushButton, QRadioButton, QSplitter, QTableWidget,
@@ -29,26 +28,20 @@ from PySide6.QtWidgets import (
 )
 
 from tagger.gui import busca as gui_busca
-from tagger.nucleo import busca, credenciais, discogs, lastfm, online
+from tagger.nucleo import busca, credenciais, discogs, online
 from tagger.nucleo.busca import ErroBusca, NAO_ENCONTRADO, Resultado
 from tagger.nucleo.metadata import rotulo
 
 log = logging.getLogger(__name__)
 
-MUSICBRAINZ, DISCOGS, LASTFM = "musicbrainz", "discogs", "lastfm"
-NOMES = {MUSICBRAINZ: "MusicBrainz", DISCOGS: "Discogs", LASTFM: "Last.fm"}
+MUSICBRAINZ, DISCOGS = "musicbrainz", "discogs"
+NOMES = {MUSICBRAINZ: "MusicBrainz", DISCOGS: "Discogs"}
 DESCRICOES = {             # dica do botão de cada serviço disponível
     MUSICBRAINZ: "Banco de dados aberto, com capas do Cover Art Archive.",
     DISCOGS: "Bom para prensagens privadas, vinis e edições raras.",
-    LASTFM: "As tags como são scrobbladas: nomes canônicos e a versão do álbum mais ouvida.",
 }
 ATRIBUICAO_MUSICBRAINZ = "Dados do MusicBrainz · capas do Cover Art Archive."
 SEM_CHAVE = credenciais.DICAS     # dica do serviço indisponível: a mesma de credenciais.estado_servicos
-
-
-def pasta_cache_lastfm():
-    """Cache do Last.fm na pasta de cache do usuário (precisa do QApplication com o nome do app)."""
-    return Path(QStandardPaths.writableLocation(QStandardPaths.CacheLocation)) / "lastfm"
 
 
 def cores_do_tema(widget):
@@ -132,67 +125,27 @@ class FonteDiscogs:
         return f"{html.escape(texto)} {_link('Ver o release no Discogs', url, discogs.DOMINIOS)}"
 
 
-class FonteLastfm:
-    nome, tem_capa = LASTFM, False
-
-    def __init__(self, cliente):
-        self.cliente = cliente
-
-    def buscar(self, artista, album, titulo):
-        """Com álbum: as versões dele pelo playcount; sem álbum: os mais scrobblados do artista."""
-        if album.strip():
-            albuns = self.cliente.versoes(artista, album)
-            if not albuns:                       # fora do top do artista: pergunta direto pelo álbum
-                albuns = [self.cliente.detalhar_album(artista, album)]
-        else:
-            albuns = self.cliente.top_albuns(artista, limite=20)
-        itens = []
-        for i, a in enumerate(albuns):
-            marca = "  · o mais scrobblado" if i == 0 and len(albuns) > 1 else ""
-            itens.append((a.descricao + marca, a))
-        return itens
-
-    def detalhar(self, album):
-        if album.faixas:
-            return album
-        detalhe = self.cliente.detalhar_album(album.artista, album.titulo)
-        detalhe.playcount = detalhe.playcount or album.playcount
-        return detalhe
-
-    def analisar(self, faixas, album, valor):
-        return lastfm.analisar(faixas, album, valor=valor)
-
-    def atribuicao(self, album):
-        texto, links = album.atribuicao
-        partes = [_link(nome, url, lastfm.DOMINIOS) for nome, url in links if nome]
-        return f"{html.escape(texto)} · " + " · ".join(partes)
-
-
 def credenciais_resolvidas(config=None):
-    """{"lastfm": api_key | None, "discogs": cabeçalho Authorization | None} já resolvidos
+    """{"discogs": cabeçalho Authorization | None} já resolvido
     (Configurações > ambiente > chaves.json), como o cliente vai usar."""
     config = config or {}
-    return {LASTFM: credenciais.lastfm_api_key(config.get("lastfm_api_key")),
-            DISCOGS: credenciais.discogs_authorization(config.get("discogs_token"))}
+    return {DISCOGS: credenciais.discogs_authorization(config.get("discogs_token"))}
 
 
-def criar_fonte(nome, credencial, pasta_cache=None):
-    """Fonte do Discogs ou do Last.fm com essa credencial (guardada em fonte.credencial); None sem ela."""
+def criar_fonte(nome, credencial):
+    """Fonte do Discogs com essa credencial (guardada em fonte.credencial); None sem ela."""
     if not credencial:
         return None
-    if nome == DISCOGS:
-        fonte = FonteDiscogs(discogs.ClienteDiscogs(credencial))
-    else:
-        fonte = FonteLastfm(lastfm.ClienteLastfm(credencial, pasta_cache=pasta_cache))
+    fonte = FonteDiscogs(discogs.ClienteDiscogs(credencial))
     fonte.credencial = credencial
     return fonte
 
 
-def criar_fontes(config=None, pasta_cache=None):
+def criar_fontes(config=None):
     """{nome: fonte ou None (sem credencial)} a partir do dicionário das Configurações."""
     fontes = {MUSICBRAINZ: FonteMusicBrainz(busca.ClienteMusicBrainz())}
     for nome, credencial in credenciais_resolvidas(config).items():
-        fontes[nome] = criar_fonte(nome, credencial, pasta_cache)
+        fontes[nome] = criar_fonte(nome, credencial)
     return fontes
 
 
@@ -234,13 +187,13 @@ class Trabalhador(QThread):
 class DialogoBuscaOnline(QDialog):
     def __init__(self, faixas, parent=None, valor=None, config=None, fontes=None, fonte_inicial=MUSICBRAINZ,
                  estados=None):
-        """`estados`: {"lastfm"|"discogs": EstadoServico(disponivel, dica)} (JanelaPrincipal.estado_servicos());
+        """`estados`: {"discogs": EstadoServico(disponivel, dica)} (JanelaPrincipal.estado_servicos());
         sem ele vale ter ou não credencial (fontes[nome] is None)."""
         super().__init__(parent)
         self.faixas = list(faixas)
         self._valor = valor or (lambda faixa, campo: faixa.tags.get(campo, ""))
         self._conhecidas = credenciais.credenciais_da_config(config)      # ocultadas em toda mensagem de erro
-        self._fontes = dict(fontes if fontes is not None else criar_fontes(config, pasta_cache_lastfm()))
+        self._fontes = dict(fontes if fontes is not None else criar_fontes(config))
         self._dicas_sem_chave = dict(SEM_CHAVE)
         self._aplicar_estados(estados)
         self._fechado = False
@@ -261,7 +214,7 @@ class DialogoBuscaOnline(QDialog):
         self.botoes_fonte = {}
         linha_fonte = QHBoxLayout()
         linha_fonte.addWidget(QLabel("Fonte"))
-        for nome in (MUSICBRAINZ, DISCOGS, LASTFM):
+        for nome in (MUSICBRAINZ, DISCOGS):
             botao = QRadioButton(NOMES[nome])
             self.grupo_fonte.addButton(botao)
             self.botoes_fonte[nome] = botao
@@ -371,7 +324,7 @@ class DialogoBuscaOnline(QDialog):
         if config is not None:
             for nome, credencial in credenciais_resolvidas(config).items():
                 if getattr(self._fontes.get(nome), "credencial", None) != credencial:
-                    self._fontes[nome] = criar_fonte(nome, credencial, pasta_cache_lastfm())
+                    self._fontes[nome] = criar_fonte(nome, credencial)
         for nome, estado in (estados or {}).items():
             if nome in SEM_CHAVE and not estado.disponivel:
                 self._fontes[nome] = None
@@ -465,8 +418,6 @@ class DialogoBuscaOnline(QDialog):
         self.atribuicao.setText(colorir_links(texto_html, self._cores))
 
     def _atribuicao_da_fonte(self, nome):
-        if nome == LASTFM:
-            return f'{html.escape(lastfm.ATRIBUICAO)} · {_link("Last.fm", lastfm.URL_SITE, lastfm.DOMINIOS)}'
         if nome == DISCOGS:
             return f'{html.escape(discogs.ATRIBUICAO)} {_link("discogs.com", discogs.URL_SITE, discogs.DOMINIOS)}'
         return ATRIBUICAO_MUSICBRAINZ
