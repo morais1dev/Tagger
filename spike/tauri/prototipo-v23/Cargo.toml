@@ -1,0 +1,17 @@
+# Protótipo: o núcleo do spike com a lofty corrigida para gravar gênero multivalor em ID3v2.3.
+# A cópia corrigida da lofty fica em ../vendor (fora do git); gere com: python preparar.py
+[package]
+name = "prototipo-v23"
+version = "0.0.0"
+edition = "2024"
+
+[[bin]]
+name = "spike-tags"
+path = "src/main.rs"
+
+[dependencies]
+nucleo = { path = "../nucleo" }
+lofty = "0.25.5"
+
+[patch.crates-io]
+lofty = { path = "../vendor/lofty-0.25.5" }

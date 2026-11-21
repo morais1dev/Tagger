@@ -31,7 +31,8 @@ from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm  # noqa: E402
 from tagger.nucleo import metadata  # noqa: E402
 from tests.conftest import criar_flac, criar_m4a, criar_mp3  # noqa: E402
 
-BINARIO = RAIZ / "spike" / "tauri" / "nucleo" / "target" / "debug" / "spike-tags.exe"
+# SPIKE_BIN troca o binário (ex.: o do protótipo com a lofty corrigida, prototipo-v23/target/debug/spike-tags.exe)
+BINARIO = Path(os.environ.get("SPIKE_BIN") or RAIZ / "spike" / "tauri" / "nucleo" / "target" / "debug" / "spike-tags.exe")
 if not BINARIO.exists():
     BINARIO = BINARIO.with_suffix("")
 

@@ -1,0 +1,25 @@
+[package]
+name = "tagger-spike"
+version = "0.0.0"
+edition = "2024"
+
+[lib]
+name = "tagger_spike_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+base64 = "0.22"
+nucleo = { path = "../nucleo" }
+
+[profile.release]
+# padrão recomendado pela Tauri para instaladores menores
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

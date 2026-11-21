@@ -9,7 +9,7 @@
 //! - "A; B" vira vários valores no artista (multivalor);
 //! - a capa é a imagem frontal (tipo 3); sem frontal, a 1ª do tipo "outra" (0). Trocar a capa não
 //!   mexe nas outras imagens (contracapa, artista...). No M4A não há tipo de imagem: é a 1ª do covr;
-//! - MP3 grava ID3v2.3 (o padrão da v2) com valores múltiplos separados por nulo.
+//! - MP3 grava ID3v2.4 por padrão (Opcoes), ou ID3v2.3 como a v2; valores múltiplos separados por nulo.
 
 use std::fs::File;
 use std::path::Path;
@@ -142,14 +142,21 @@ fn dividir(campo: Campo, valor: &str) -> Vec<String> {
     if partes.is_empty() { vec![valor.to_string()] } else { partes }
 }
 
-/// Versão do ID3v2 ao gravar MP3: 3 (padrão da v2) ou 4. Só para o spike, vem da variável de
-/// ambiente SPIKE_ID3 (o produto receberia isso por parâmetro, como OpcoesGravacao na v2).
-pub fn versao_id3() -> u8 {
-    if std::env::var("SPIKE_ID3").as_deref() == Ok("4") { 4 } else { 3 }
+/// Opções de gravação (como OpcoesGravacao na v2). `versao_id3`: 3 ou 4, só para MP3.
+/// O padrão é 4: com a lofty, o ID3v2.3 corrompe gênero multivalor (veja docs/spike/tauri.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Opcoes {
+    pub versao_id3: u8,
 }
 
-fn opcoes_gravacao() -> WriteOptions {
-    WriteOptions::default().use_id3v23(versao_id3() == 3)
+impl Default for Opcoes {
+    fn default() -> Self {
+        Opcoes { versao_id3: 4 }
+    }
+}
+
+fn opcoes_gravacao(opcoes: Opcoes) -> WriteOptions {
+    WriteOptions::default().use_id3v23(opcoes.versao_id3 == 3)
 }
 
 /// Leitura do MP3 sem as "conversões implícitas" da lofty. Com elas, um TDRC com data completa
@@ -220,18 +227,18 @@ fn ler_mp3(caminho: &Path) -> Resultado<Tags> {
     Ok(tags)
 }
 
-fn editar_mp3(caminho: &Path, editar: impl FnOnce(&mut Id3v2Tag)) -> Resultado<()> {
+fn editar_mp3(caminho: &Path, opcoes: Opcoes, editar: impl FnOnce(&mut Id3v2Tag)) -> Resultado<()> {
     let mut arquivo = MpegFile::read_from(&mut File::open(caminho)?, opcoes_leitura_mp3())?;
     if arquivo.id3v2().is_none() {
         arquivo.set_id3v2(Id3v2Tag::new());
     }
     editar(arquivo.id3v2_mut().expect("acabou de ser criado"));
-    arquivo.save_to(&mut abrir(caminho)?, opcoes_gravacao())?;
+    arquivo.save_to(&mut abrir(caminho)?, opcoes_gravacao(opcoes))?;
     Ok(())
 }
 
-fn gravar_mp3(caminho: &Path, campo: Campo, valor: &str) -> Resultado<()> {
-    editar_mp3(caminho, |tag| {
+fn gravar_mp3(caminho: &Path, opcoes: Opcoes, campo: Campo, valor: &str) -> Resultado<()> {
+    editar_mp3(caminho, opcoes, |tag| {
         let id = id_mp3(campo);
         let _ = tag.remove(&id).count();
         if !valor.is_empty() {
@@ -241,8 +248,8 @@ fn gravar_mp3(caminho: &Path, campo: Campo, valor: &str) -> Resultado<()> {
     })
 }
 
-fn capa_mp3(caminho: &Path, dados: &[u8], mime: &str) -> Resultado<()> {
-    editar_mp3(caminho, |tag| {
+fn capa_mp3(caminho: &Path, opcoes: Opcoes, dados: &[u8], mime: &str) -> Resultado<()> {
+    editar_mp3(caminho, opcoes, |tag| {
         let remover: Vec<Picture> = capas_mp3(tag).into_iter().cloned().collect();
         tag.retain(|f| !matches!(f, Frame::Picture(p) if remover.contains(&*p.picture)));
         let picture = nova_imagem(dados, mime, PictureType::CoverFront);
@@ -334,18 +341,18 @@ fn ler_flac(caminho: &Path) -> Resultado<Tags> {
     Ok(tags)
 }
 
-fn editar_flac(caminho: &Path, editar: impl FnOnce(&mut FlacFile)) -> Resultado<()> {
+fn editar_flac(caminho: &Path, opcoes: Opcoes, editar: impl FnOnce(&mut FlacFile)) -> Resultado<()> {
     let mut arquivo = FlacFile::read_from(&mut File::open(caminho)?, ParseOptions::new())?;
     if arquivo.vorbis_comments().is_none() {
         arquivo.set_vorbis_comments(VorbisComments::default());
     }
     editar(&mut arquivo);
-    arquivo.save_to(&mut abrir(caminho)?, opcoes_gravacao())?;
+    arquivo.save_to(&mut abrir(caminho)?, opcoes_gravacao(opcoes))?;
     Ok(())
 }
 
-fn gravar_flac(caminho: &Path, campo: Campo, valor: &str) -> Resultado<()> {
-    editar_flac(caminho, |arquivo| {
+fn gravar_flac(caminho: &Path, opcoes: Opcoes, campo: Campo, valor: &str) -> Resultado<()> {
+    editar_flac(caminho, opcoes, |arquivo| {
         let tag = arquivo.vorbis_comments_mut().expect("acabou de ser criado");
         for chave in chaves_flac(campo) {
             let _ = tag.remove(chave).count();
@@ -371,8 +378,8 @@ fn gravar_flac(caminho: &Path, campo: Campo, valor: &str) -> Resultado<()> {
     })
 }
 
-fn capa_flac(caminho: &Path, dados: &[u8], mime: &str) -> Resultado<()> {
-    editar_flac(caminho, |arquivo| {
+fn capa_flac(caminho: &Path, opcoes: Opcoes, dados: &[u8], mime: &str) -> Resultado<()> {
+    editar_flac(caminho, opcoes, |arquivo| {
         // a capa atual pode estar em bloco PICTURE ou em METADATA_BLOCK_PICTURE; troca só ela
         let capas: Vec<Picture> = {
             let imagens = imagens_flac_todas(arquivo);
@@ -448,18 +455,18 @@ fn ler_m4a(caminho: &Path) -> Resultado<Tags> {
     Ok(tags)
 }
 
-fn editar_m4a(caminho: &Path, editar: impl FnOnce(&mut Ilst)) -> Resultado<()> {
+fn editar_m4a(caminho: &Path, opcoes: Opcoes, editar: impl FnOnce(&mut Ilst)) -> Resultado<()> {
     let mut arquivo = Mp4File::read_from(&mut File::open(caminho)?, ParseOptions::new())?;
     if arquivo.ilst().is_none() {
         arquivo.set_ilst(Ilst::new());
     }
     editar(arquivo.ilst_mut().expect("acabou de ser criado"));
-    arquivo.save_to(&mut abrir(caminho)?, opcoes_gravacao())?;
+    arquivo.save_to(&mut abrir(caminho)?, opcoes_gravacao(opcoes))?;
     Ok(())
 }
 
-fn gravar_m4a(caminho: &Path, campo: Campo, valor: &str) -> Resultado<()> {
-    editar_m4a(caminho, |tag| {
+fn gravar_m4a(caminho: &Path, opcoes: Opcoes, campo: Campo, valor: &str) -> Resultado<()> {
+    editar_m4a(caminho, opcoes, |tag| {
         if campo == Campo::Faixa {
             // trkn é um par (faixa, total), como no ID3: apagar a faixa apaga o total junto
             tag.remove_track();
@@ -484,8 +491,8 @@ fn gravar_m4a(caminho: &Path, campo: Campo, valor: &str) -> Resultado<()> {
     })
 }
 
-fn capa_m4a(caminho: &Path, dados: &[u8], mime: &str) -> Resultado<()> {
-    editar_m4a(caminho, |tag| {
+fn capa_m4a(caminho: &Path, opcoes: Opcoes, dados: &[u8], mime: &str) -> Resultado<()> {
+    editar_m4a(caminho, opcoes, |tag| {
         // M4A não tem tipo de imagem: "a capa" é a 1ª do covr; as demais ficam
         let resto: Vec<Picture> = tag.pictures().map(|p| p.skip(1).cloned().collect()).unwrap_or_default();
         tag.remove_pictures();
@@ -515,20 +522,20 @@ pub fn ler(caminho: &Path) -> Resultado<Tags> {
 }
 
 /// Grava um campo (vazio = remove), num único save; o resto do arquivo não é tocado.
-pub fn gravar(caminho: &Path, campo: Campo, valor: &str) -> Resultado<()> {
+pub fn gravar(caminho: &Path, campo: Campo, valor: &str, opcoes: Opcoes) -> Resultado<()> {
     match formato(caminho)? {
-        Formato::Mp3 => gravar_mp3(caminho, campo, valor),
-        Formato::Flac => gravar_flac(caminho, campo, valor),
-        Formato::M4a => gravar_m4a(caminho, campo, valor),
+        Formato::Mp3 => gravar_mp3(caminho, opcoes, campo, valor),
+        Formato::Flac => gravar_flac(caminho, opcoes, campo, valor),
+        Formato::M4a => gravar_m4a(caminho, opcoes, campo, valor),
     }
 }
 
 /// Troca só a capa frontal; contracapa e outras imagens ficam.
-pub fn definir_capa(caminho: &Path, dados: &[u8], mime: &str) -> Resultado<()> {
+pub fn definir_capa(caminho: &Path, dados: &[u8], mime: &str, opcoes: Opcoes) -> Resultado<()> {
     match formato(caminho)? {
-        Formato::Mp3 => capa_mp3(caminho, dados, mime),
-        Formato::Flac => capa_flac(caminho, dados, mime),
-        Formato::M4a => capa_m4a(caminho, dados, mime),
+        Formato::Mp3 => capa_mp3(caminho, opcoes, dados, mime),
+        Formato::Flac => capa_flac(caminho, opcoes, dados, mime),
+        Formato::M4a => capa_m4a(caminho, opcoes, dados, mime),
     }
 }
 
@@ -542,3 +549,4 @@ pub fn imagens(caminho: &Path) -> Resultado<Vec<Imagem>> {
 }
 
 pub mod amostras;
+pub mod cli;

@@ -13,7 +13,10 @@ use lofty::mp4::{Ilst, Mp4File};
 use lofty::mpeg::MpegFile;
 use lofty::ogg::OggPictureStorage;
 use lofty::picture::{MimeType, Picture, PictureInformation, PictureType};
-use nucleo::{Campo, amostras, definir_capa, gravar, imagens, ler};
+use nucleo::{Campo, Opcoes, amostras, definir_capa, gravar, imagens, ler};
+
+/// Os testes gravam MP3 em ID3v2.3 (o caso mais exigente); o v2.4 é testado à parte.
+const V23: Opcoes = Opcoes { versao_id3: 3 };
 
 const JPEG: &[u8] = b"\xff\xd8\xff\xe0jpeg-falso-jpeg-falso-jpeg-falso";
 const OUTRA_CAPA: &[u8] = b"\xff\xd8\xff\xe0outra-capa-jpeg";
@@ -54,10 +57,10 @@ fn arquivo_novo_le_vazio() {
 fn grava_e_rele_os_quatro_campos() {
     for fmt in FORMATOS {
         let a = amostra(fmt);
-        gravar(&a, Campo::Titulo, "Título ção").unwrap();
-        gravar(&a, Campo::Artista, "A").unwrap();
-        gravar(&a, Campo::Faixa, "3/12").unwrap();
-        gravar(&a, Campo::Gravadora, "Selo").unwrap();
+        gravar(&a, Campo::Titulo, "Título ção", V23).unwrap();
+        gravar(&a, Campo::Artista, "A", V23).unwrap();
+        gravar(&a, Campo::Faixa, "3/12", V23).unwrap();
+        gravar(&a, Campo::Gravadora, "Selo", V23).unwrap();
         let t = ler(&a).unwrap();
         assert_eq!(t.titulo, "Título ção", "{fmt}");
         assert_eq!(t.artista, "A", "{fmt}");
@@ -70,10 +73,10 @@ fn grava_e_rele_os_quatro_campos() {
 fn gravar_um_campo_preserva_os_outros() {
     for fmt in FORMATOS {
         let a = amostra(fmt);
-        gravar(&a, Campo::Titulo, "Fica").unwrap();
-        gravar(&a, Campo::Gravadora, "Selo").unwrap();
-        definir_capa(&a, JPEG, "image/jpeg").unwrap();
-        gravar(&a, Campo::Artista, "Novo").unwrap();
+        gravar(&a, Campo::Titulo, "Fica", V23).unwrap();
+        gravar(&a, Campo::Gravadora, "Selo", V23).unwrap();
+        definir_capa(&a, JPEG, "image/jpeg", V23).unwrap();
+        gravar(&a, Campo::Artista, "Novo", V23).unwrap();
         let t = ler(&a).unwrap();
         assert_eq!((t.titulo.as_str(), t.gravadora.as_str(), t.artista.as_str()), ("Fica", "Selo", "Novo"), "{fmt}");
         assert_eq!(t.capa.unwrap().dados, JPEG, "{fmt}");
@@ -84,10 +87,10 @@ fn gravar_um_campo_preserva_os_outros() {
 fn valor_vazio_remove_o_campo() {
     for fmt in FORMATOS {
         let a = amostra(fmt);
-        gravar(&a, Campo::Titulo, "X").unwrap();
-        gravar(&a, Campo::Faixa, "4/9").unwrap();
-        gravar(&a, Campo::Titulo, "").unwrap();
-        gravar(&a, Campo::Faixa, "").unwrap();
+        gravar(&a, Campo::Titulo, "X", V23).unwrap();
+        gravar(&a, Campo::Faixa, "4/9", V23).unwrap();
+        gravar(&a, Campo::Titulo, "", V23).unwrap();
+        gravar(&a, Campo::Faixa, "", V23).unwrap();
         let t = ler(&a).unwrap();
         assert_eq!((t.titulo.as_str(), t.faixa.as_str()), ("", ""), "{fmt}");
     }
@@ -97,17 +100,17 @@ fn valor_vazio_remove_o_campo() {
 fn multivalor_vira_valores_separados() {
     for fmt in FORMATOS {
         let a = amostra(fmt);
-        gravar(&a, Campo::Artista, "A; B").unwrap();
+        gravar(&a, Campo::Artista, "A; B", V23).unwrap();
         assert_eq!(ler(&a).unwrap().artista, "A; B", "{fmt}");
     }
     // e no disco são dois valores de verdade (não o texto "A; B")
     let mp3 = amostra("mp3");
-    gravar(&mp3, Campo::Artista, "A; B").unwrap();
+    gravar(&mp3, Campo::Artista, "A; B", V23).unwrap();
     let f = MpegFile::read_from(&mut File::open(&mp3).unwrap(), ParseOptions::new()).unwrap();
     let tpe1: Vec<&str> = f.id3v2().unwrap().get_texts(&FrameId::new("TPE1").unwrap()).unwrap().collect();
     assert_eq!(tpe1, ["A", "B"]);
     let flac = amostra("flac");
-    gravar(&flac, Campo::Artista, "A; B").unwrap();
+    gravar(&flac, Campo::Artista, "A; B", V23).unwrap();
     let f = FlacFile::read_from(&mut File::open(&flac).unwrap(), ParseOptions::new()).unwrap();
     assert_eq!(f.vorbis_comments().unwrap().get_all("ARTIST").collect::<Vec<_>>(), ["A", "B"]);
 }
@@ -115,7 +118,7 @@ fn multivalor_vira_valores_separados() {
 #[test]
 fn mp3_grava_id3v23() {
     let a = amostra("mp3");
-    gravar(&a, Campo::Titulo, "A").unwrap();
+    gravar(&a, Campo::Titulo, "A", V23).unwrap();
     let bytes = std::fs::read(&a).unwrap();
     assert_eq!(&bytes[..4], b"ID3\x03");
 }
@@ -161,11 +164,11 @@ fn trocar_a_capa_mantem_as_outras_imagens() {
     for fmt in FORMATOS {
         let a = amostra(fmt);
         if fmt == "m4a" {
-            definir_capa(&a, JPEG, "image/jpeg").unwrap(); // M4A: a capa é a 1ª imagem; a 2ª é "outra"
+            definir_capa(&a, JPEG, "image/jpeg", V23).unwrap(); // M4A: a capa é a 1ª imagem; a 2ª é "outra"
         }
         por_contracapa(&a);
-        definir_capa(&a, JPEG, "image/jpeg").unwrap();
-        definir_capa(&a, OUTRA_CAPA, "image/jpeg").unwrap(); // trocar de novo
+        definir_capa(&a, JPEG, "image/jpeg", V23).unwrap();
+        definir_capa(&a, OUTRA_CAPA, "image/jpeg", V23).unwrap(); // trocar de novo
         let lista = imagens(&a).unwrap();
         assert_eq!(lista.len(), 2, "{fmt}: {lista:?}");
         assert!(lista.iter().any(|i| i.mime == "image/png" && i.tamanho == PNG.len()), "{fmt}: a contracapa sumiu");
@@ -182,10 +185,18 @@ fn trocar_a_capa_mantem_as_outras_imagens() {
 fn ler_nunca_grava() {
     for fmt in FORMATOS {
         let a = amostra(fmt);
-        gravar(&a, Campo::Titulo, "X").unwrap();
+        gravar(&a, Campo::Titulo, "X", V23).unwrap();
         let antes = std::fs::read(&a).unwrap();
         ler(&a).unwrap();
         imagens(&a).unwrap();
         assert_eq!(std::fs::read(&a).unwrap(), antes, "{fmt}");
     }
+}
+
+#[test]
+fn mp3_grava_id3v24_por_padrao() {
+    let a = amostra("mp3");
+    gravar(&a, Campo::Titulo, "A", Opcoes::default()).unwrap();
+    assert_eq!(&std::fs::read(&a).unwrap()[..4], b"ID3\x04");
+    assert_eq!(ler(&a).unwrap().titulo, "A");
 }
