@@ -2,6 +2,11 @@
 
 All notable changes to Tagger are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.2.1] — Unreleased
+
+### Security
+- Testes automáticos garantem que as chaves das APIs (Discogs e chaves em URLs) são ocultadas em logs e mensagens de erro (`tests/test_seguranca.py`).
+
 ## [2.2.0] — 2026-10-24
 
 ### Added
