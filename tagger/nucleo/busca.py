@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 from tagger import __version__
 
-CONTATO = "contato-do-projeto"     # TODO(dono): e-mail ou URL do projeto; o MusicBrainz exige um contato real
+CONTATO = "https://github.com/morais1dev/Tagger"     # o MusicBrainz exige um contato real no User-Agent
 USER_AGENT = f"Tagger/{__version__} ( {CONTATO} )"
 URL_MB = "https://musicbrainz.org/ws/2"
 URL_CAPA = "https://coverartarchive.org/release"

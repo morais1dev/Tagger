@@ -40,9 +40,8 @@ def test_fechar_com_consulta_pendente_nao_espera_nem_quebra(qtbot, janela, monke
     janela.verificar_atualizacao()
     assert comecou.wait(5) and janela._verificador.is_alive()
 
-    inicio = time.monotonic()
-    assert janela.close() is True
-    assert time.monotonic() - inicio < 2                   # não esperou a consulta (o TIMEOUT é de 10 s)
+    assert janela.close() is True                          # voltou sem esperar: a consulta continua rodando
+    assert janela._verificador.is_alive() and not soltar.is_set()
 
     soltar.set()                                           # a consulta termina com a janela já fechada
     janela._verificador.join(5)

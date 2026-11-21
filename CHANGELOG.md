@@ -7,7 +7,10 @@ All notable changes to Tagger are listed here. Versions follow [Semantic Version
 ### Added
 - **New version notice**: when Tagger opens, it checks the project's latest GitHub Release (at most once a day) and, if there is a newer version, shows a notice with a link to the Release page. Tagger never downloads or installs anything by itself, and a failed check (no internet, GitHub error) is silent. You can turn it off in Settings → Behavior.
 
-## [2.2.1] — Unreleased
+## [2.2.1] — 2026-11-21
+
+### Fixed
+- MusicBrainz requests now send a real contact in the User-Agent.
 
 ### Removed
 - Last.fm lookup removed (changes to the Last.fm API terms). The online search keeps MusicBrainz and Discogs; the Last.fm API key field and its guide are gone from Settings → Online services. A Last.fm key saved earlier, in your settings or in an old `chaves.json`, is simply ignored.
