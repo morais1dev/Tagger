@@ -1,0 +1,66 @@
+/* Configurações e Sobre: só usam os tokens de cor de temas.css. */
+.cfg-fundo {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.45); z-index: 10;
+}
+.cfg-janela {
+  display: flex; flex-direction: column; gap: 12px; box-sizing: border-box;
+  width: min(640px, 100vw - 32px); max-height: calc(100vh - 32px); padding: 20px 20px 16px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--line2); border-radius: 12px;
+}
+.cfg-sobre { width: min(460px, 100vw - 32px); }
+.cfg-titulo { margin: 0; font-size: 1.2em; }
+.cfg-abas { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.cfg-abas [role="tab"] {
+  background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted);
+  padding: 6px 12px; font: inherit; cursor: pointer;
+}
+.cfg-abas [role="tab"][aria-selected="true"] { color: var(--text); border-bottom-color: var(--acento); }
+.cfg-abas [role="tab"]:hover { background: var(--hover); }
+.cfg-painel { overflow-y: auto; min-height: 320px; }
+.cfg-aba { display: flex; flex-direction: column; gap: 12px; padding: 12px 4px; }
+.cfg-linha { display: grid; grid-template-columns: 170px 1fr; align-items: center; gap: 12px; }
+.cfg-rotulo { color: var(--muted); }
+.cfg-controle { display: flex; flex-direction: column; gap: 6px; }
+.cfg-secao { margin: 8px 0 0; font-size: 1em; }
+.cfg-ajuda { margin: 0; color: var(--muted); font-size: 0.92em; }
+.cfg-opcao { display: flex; align-items: center; gap: 8px; }
+.cfg-radios { display: flex; gap: 16px; }
+.cfg-radios.cfg-coluna { flex-direction: column; gap: 6px; }
+.cfg-acentos { display: flex; flex-direction: column; gap: 8px; }
+.cfg-amostras { display: flex; gap: 8px; }
+.cfg-amostra { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+.cfg-amostra[aria-pressed="true"] { border-color: var(--text); }
+.cfg-botoes-cor { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cfg-cor-livre { display: flex; align-items: center; gap: 8px; }
+.cfg-numero { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cfg-capa { display: flex; align-items: center; gap: 12px; }
+.cfg-sufixo { color: var(--muted); }
+.cfg-erro { color: var(--erro); font-size: 0.92em; }
+.cfg-senha { display: flex; gap: 8px; }
+.cfg-senha input { flex: 1; }
+.cfg-guia { align-self: flex-start; background: none; border: 0; color: var(--text); font: inherit; cursor: pointer; padding: 4px 0; }
+.cfg-tutorial { color: var(--muted); }
+.cfg-tutorial a { color: var(--acento); }
+.cfg-sobre a { color: var(--acento); }
+.cfg-rodape { display: flex; align-items: center; gap: 8px; }
+.cfg-espaco { flex: 1; }
+
+.cfg-janela input[type="text"], .cfg-janela input[type="password"], .cfg-janela input[type="number"],
+.cfg-janela textarea, .cfg-janela select {
+  background: var(--field); color: var(--text); border: 1px solid var(--line2); border-radius: 6px;
+  padding: 4px 8px; font: inherit;
+}
+.cfg-janela input[aria-invalid="true"] { border-color: var(--erro); }
+.cfg-janela textarea { resize: vertical; }
+.cfg-janela :focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
+.cfg-botao {
+  background: var(--surface2); color: var(--text); border: 1px solid var(--line2); border-radius: 6px;
+  padding: 5px 12px; font: inherit; cursor: pointer;
+}
+.cfg-botao:hover { background: var(--hover); }
+.cfg-botao[aria-pressed="true"] { border-color: var(--acento); }
+.cfg-botao:disabled { opacity: 0.5; cursor: default; }
+.cfg-fantasma { background: none; border-color: transparent; color: var(--muted); }
+.cfg-primario { background: var(--acento); border-color: var(--acento); color: var(--bg); }
+.cfg-primario:hover { background: var(--acento); filter: brightness(1.1); }
