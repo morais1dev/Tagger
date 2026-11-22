@@ -9,6 +9,7 @@ Lista de tudo o que um usuário consegue fazer na v2.3 (Python + PySide6), com o
 - **Núcleo:** módulo da v2 em `tagger/nucleo/` → módulo previsto no crate `core/` (`tagger-core`, Rust, sem Tauri e sem interface). Os nomes dos módulos Rust são uma **proposta** (caminhos relativos a `core/src/`); o dono do núcleo pode ajustá-los, mas a linha deve continuar apontando para algum módulo.
 - **Interface:** tela ou diálogo da v2 em `tagger/gui/` → componente previsto em `app/src/` (React + TypeScript). O `app/src-tauri` só faz a ponte com o núcleo e não aparece aqui, a não ser quando a funcionalidade é do sistema (janela, arquivos, pasta de dados).
 - **Teste:** arquivo pytest que cobre o comportamento hoje. `—` significa que a v2 **não tem teste** para a funcionalidade (a v3 deve criar um, no Rust, no front ou ponta a ponta). `GUI` quer dizer que o teste usa a janela real em modo offscreen.
+- **Teste de interface:** componentes React testados com vitest + React Testing Library; o teste ponta a ponta (tauri-driver/WebDriver) será avaliado depois. Uma linha de interface fica `ok` com teste de componente. Os testes pytest do núcleo são portados para `cargo test`, mapeados em `docs/paridade-testes.md`.
 - **Status:** `pendente` (nada feito), `em andamento`, `ok` (comportamento igual ao da v2, com teste) ou `fora` (decidido que não volta).
 - **Id:** `A-01` etc., para citar a linha em tarefas e revisões.
 
@@ -42,7 +43,7 @@ Lista de tudo o que um usuário consegue fazer na v2.3 (Python + PySide6), com o
 |---|---|---|---|---|---|
 | A-01 | Abrir pasta (botão "Abrir pasta", `Ctrl+O`, botão da tela inicial); lembra a última pasta usada no seletor | `metadata.listar_audios` → `tags.rs` (`listar_audios`) | `janela.abrir_pasta` + `QFileDialog` → `app/src/components/BarraTopo` + diálogo de pasta (ponte Tauri) | `test_interface.py` (GUI, sem o seletor) | pendente |
 | A-02 | Adicionar arquivos soltos ("Adicionar arquivos"; "Escolher arquivos" na tela inicial), sem trocar a lista quando já há faixas | `metadata.carregar_varios` → `tags.rs` | `janela.adicionar_arquivos` → `BarraTopo` / `TelaVazia` | `test_interface.py` (GUI, parcial) | pendente |
-| A-03 | Arrastar e soltar pastas ou arquivos de áudio na janela; só aceita pasta ou formato suportado; borda de destaque na tela vazia e aviso "Solte para adicionar à lista" sobre a tabela | `metadata.formato` → `tags.rs` | `janela.dragEnterEvent/dropEvent`, `vazio.destacar`, `overlay_drop` → `Janela` (eventos de arrastar do Tauri) + `TelaVazia` + `TabelaFaixas` | — | pendente |
+| A-03 | Arrastar e soltar pastas ou arquivos de áudio na janela; só aceita pasta ou formato suportado; borda de destaque na tela vazia e aviso "Solte para adicionar à lista" sobre a tabela | `metadata.formato` → `tags.rs` | `janela.dragEnterEvent/dropEvent`, `vazio.destacar`, `overlay_drop` → `Janela` (eventos de arrastar do Tauri) + `TelaVazia` + `TabelaFaixas`. Buscar paridade; qualquer diferença pequena deve ser registrada nesta linha | — | pendente |
 | A-04 | Abrir arquivos ou pastas passados na linha de comando (ou arrastados sobre o `.exe`): `Tagger.exe "D:\Música\Álbum"` | `listar_audios` → `tags.rs` | `janela.main` (`sys.argv`) → `app/src-tauri` (argumentos de inicialização) | — | pendente |
 | A-05 | Incluir subpastas ao abrir uma pasta (opção em Configurações, ligada por padrão); o texto da tela inicial muda junto | `metadata.listar_audios(recursivo)` → `tags.rs` | `configuracoes.ck_subpastas`, `vazio.definir_subpastas` → `Configuracoes/Comportamento`, `TelaVazia` | — | pendente |
 | A-06 | Leitura em segundo plano com barra de progresso ("Lendo arquivos… i/n") e janela sem travar; aviso "Aguarde: ainda estou trabalhando…" se pedir outra operação | `metadata.carregar_varios(progresso)` → `tags.rs` (assíncrono) | `janela.Carregador`, `_mostrar_progresso`, `_ocupado` → `BarraStatus` + estado de ocupado | — | pendente |
@@ -54,7 +55,7 @@ Lista de tudo o que um usuário consegue fazer na v2.3 (Python + PySide6), com o
 | A-12 | Migalha com o caminho da pasta aberta (ou "Arquivos avulsos"), com tooltip do caminho; acompanha os arquivos quando são movidos para outra pasta (organizar, desfazer) | `organizar.pasta_apos_mover`, `pasta_comum` → `organizar.rs` | `rotulo.Migalha`, `janela._atualizar_migalha`, `_seguir_arquivos_movidos` → `app/src/components/Migalha` | `test_organizar.py` (`test_pasta_apos_mover_*`, `test_pasta_comum`) | pendente |
 | A-13 | Recarregar do disco (`F5`, menu da tabela): relê os arquivos da lista, acha arquivos novos na pasta aberta e remove os que sumiram ou não abrem; pede confirmação se há alterações pendentes | `listar_audios`, `carregar_varios` → `tags.rs` | `janela.recarregar/_ao_recarregar` → ação "Recarregar do disco" | `test_interface.py` (GUI, `test_recarregar_do_disco_traz_o_que_foi_salvo`) | pendente |
 | A-14 | Remover da lista (`Delete`, menu da tabela): tira as faixas selecionadas da lista (não apaga do disco) e descarta as alterações pendentes delas; texto muda para "Remover N da lista" | `Rascunho.descartar(caminhos)` → `rascunho.rs` | `janela.remover_da_lista` → ação da tabela | — | pendente |
-| A-15 | Mostrar na pasta (menu da tabela): abre o Explorer com o arquivo selecionado | — | `janela.mostrar_na_pasta`, `mostrar_no_explorador` → ponte Tauri (revelar arquivo) | — | pendente |
+| A-15 | Mostrar na pasta (menu da tabela): abre o Explorer com o arquivo selecionado | — | `janela.mostrar_na_pasta`, `mostrar_no_explorador` → `tauri-plugin-opener` (revelar arquivo no Explorer) | — | pendente |
 | A-16 | Formatos aceitos: MP3, FLAC, Ogg (Vorbis, Opus, FLAC no Ogg), M4A e MP4 (ver a seção K para os detalhes de cada um) | `metadata.EXTENSOES_SUPORTADAS` → `tags.rs` | filtro dos seletores de arquivo → diálogo de arquivos | `test_metadata.py` (`test_formatos_suportados`) | pendente |
 
 ## B. Tabela de faixas
@@ -107,8 +108,8 @@ Lista de tudo o que um usuário consegue fazer na v2.3 (Python + PySide6), com o
 | D-01 | Quadro da capa (112 px, cantos arredondados) com a imagem da seleção, "Sem capa" ou "‹várias capas›"; informações de formato, dimensões e tamanho em KB | `metadata.ler_capa` → `capa.rs` | `editor.QuadroCapa`, `_mostrar_capa`, `_descrever_capa` → `PainelEditor/Capa` | — | pendente |
 | D-02 | Só a capa frontal é lida, trocada ou removida; contracapa, foto do artista e outras imagens são mantidas (no M4A a primeira imagem é a capa; no Ogg, o `COVERART` antigo também) | `formatos.escolher_capa`, `metadata.definir_capa/remover_capa` → `capa.rs`, `formatos/*.rs` | — | `test_metadata.py` (`test_trocar_capa_mantem_outras_imagens`, `test_remover_capa_mantem_outras_imagens`, `test_capa_do_tipo_outra`, `test_so_contracapa_nao_conta_como_capa`, `test_outro_capa_definir_trocar_remover`, `test_outro_outras_imagens_ficam`, `test_vorbis_so_contracapa_nao_conta_como_capa`, `test_ogg_coverart_antigo`, `test_flac_sem_vorbis_comment_remove_capa`) | pendente |
 | D-03 | Trocar capa: botão "Trocar capa" (seletor de `.jpg`, `.jpeg`, `.png`) e opção "Escolher imagem…" do menu | `Rascunho.definir_capa` → `rascunho.rs` | `editor._escolher_capa` → `PainelEditor/Capa` | `test_rascunho.py` (`test_desfazer_capa`) | pendente |
-| D-04 | Arrastar uma imagem (arquivo `.jpg`/`.jpeg`/`.png` ou imagem arrastada) sobre o quadro da capa; borda de destaque enquanto arrasta | — | `editor.QuadroCapa.dropEvent`, `imagem_do_mime` → `PainelEditor/Capa` | — | pendente |
-| D-05 | Colar imagem da área de transferência (menu "Colar imagem", desligado se não há imagem; aviso "Não há imagem na área de transferência.") | — | `editor.colar_capa` → `PainelEditor/Capa` (ponte Tauri para a área de transferência) | — | pendente |
+| D-04 | Arrastar uma imagem (arquivo `.jpg`/`.jpeg`/`.png` ou imagem arrastada) sobre o quadro da capa; borda de destaque enquanto arrasta | — | `editor.QuadroCapa.dropEvent`, `imagem_do_mime` → `PainelEditor/Capa`. Buscar paridade; diferença pequena deve ser registrada nesta linha | — | pendente |
+| D-05 | Colar imagem da área de transferência (menu "Colar imagem", desligado se não há imagem; aviso "Não há imagem na área de transferência.") | — | `editor.colar_capa` → `PainelEditor/Capa` (ponte Tauri para a área de transferência). Buscar paridade; diferença pequena deve ser registrada nesta linha | — | pendente |
 | D-06 | Menu "Mais opções da capa" (botão "…" e clique direito no quadro): Escolher imagem, Colar imagem, Exportar capa, Salvar como cover.jpg na pasta, Remover capa, Manter capa original | — | `editor._menu_capa` → `PainelEditor/MenuCapa` | — | pendente |
 | D-07 | Exportar capa para um arquivo (nome sugerido pelo álbum, sem caracteres inválidos; `.png` ou `.jpg` conforme o tipo) | — | `editor._exportar_capa` → `PainelEditor/MenuCapa` (diálogo de salvar) | — | pendente |
 | D-08 | Salvar a capa mostrada como `cover.jpg`/`cover.png` na pasta de cada arquivo selecionado, perguntando antes de substituir; avisa falhas por pasta | — | `editor._salvar_cover_na_pasta` → `PainelEditor/MenuCapa` | — | pendente |
@@ -251,6 +252,7 @@ Janela `Ctrl+,` com 4 abas. Cada mudança é aplicada na hora (prévia ao vivo, 
 | J-21 | "Restaurar padrões" (aparência, comportamento e tags; **não** apaga os padrões de nome recentes nem a chave colada) | `config.PADROES` → `config.rs` | `configuracoes._restaurar_padroes` | — | pendente |
 | J-22 | Botão "Sobre o Tagger" dentro das Configurações | ver L-04 | `configuracoes._sobre` | — | pendente |
 | J-23 | Preferências salvas entre sessões (v2: `QSettings`, registro do Windows) e padrões de nome com recentes: `padrao_renomear`, `padrao_tags`, `padrao_organizar`, `recentes_*` | `config.rs` | preferências na ponte Tauri | `test_qsettings.py` | pendente |
+| J-25 | Importar as configurações da v2 na primeira execução da v3: lê (só leitura, sem apagar nada) o registro `HKCU\Software\Tagger\Tagger` e traz tema, cores, fontes, comportamento, opções de tags, gêneros, padrões e recentes, pastas recentes, colunas e geometria quando possível e o token do Discogs; chaves antigas (Last.fm) não são importadas | `config.rs` (leitura do registro, só Windows) | `app/src-tauri` (leitura) → `Configuracoes` (aviso do que foi importado) | — | pendente |
 | J-24 | Chave antiga do Last.fm apagada das preferências ao iniciar (limpeza de migração da v2.2.1/2.3.0) | `config.CHAVES_ANTIGAS` → `config.rs` | — | `test_atribuicao.py` (`test_carregar_config_remove_a_chave_antiga_do_lastfm`) | pendente |
 
 ## K. Formatos e tags
@@ -289,24 +291,18 @@ Janela `Ctrl+,` com 4 abas. Cada mudança é aplicada na hora (prévia ao vivo, 
 | M-04 | Folha de estilo única com o tema aplicado a botões (primário, fantasma, amostra), campos, abas, listas, tabelas, menus, barras de rolagem, status e diálogos; erro com borda vermelha | — | `tema.folha_de_estilo` → CSS do app | — | pendente |
 | M-05 | Fontes e tamanho aplicados à interface inteira (incluindo menus e diálogos); números em fonte monoespaçada | `tema.escolher_fontes` | `app/src/tema` | — | pendente |
 
-## N. Linha de comando (v1.0, `python -m tagger.cli`)
-
-| Id | Funcionalidade | Núcleo (v2 → v3) | Interface | Teste | Status |
-|---|---|---|---|---|---|
-| N-01 | Menu "Edição individual / Bulk edit / Sair" no terminal, com título da janela e versão | `cli.py` → (decisão pendente: ver "Dúvidas") | terminal | — | pendente |
-| N-02 | Edição individual: escolher arquivos num seletor nativo (Tkinter), lista com marca `[editado]`, escolher a tag por número, valor novo (`Enter` cancela, `-` remove, `atual` = ano atual), valida e grava na hora, mostra os formatos aceitos | `metadata.carregar/salvar/validar_valor` → `tags.rs` | terminal | — | pendente |
-| N-03 | Bulk edit: escolher arquivos, escolher um campo entre `CAMPOS_BULK` (artista, álbum, artista do álbum, disco, ano, gênero, compositor, letrista, comentário, gravadora), pedir valor, confirmar `S/N` e aplicar a todos, com relatório de falhas | `metadata.salvar_varios`, `CAMPOS_BULK` → `tags.rs` | terminal | — | pendente |
-
 ## O. Distribuição e processo
 
 | Id | Funcionalidade | Núcleo | Interface / build (v2 → v3) | Teste | Status |
 |---|---|---|---|---|---|
 | O-01 | Executável Windows único (`Tagger.exe`) sem precisar de Python, gerado e anexado a uma Release do GitHub ao publicar uma tag `vX.Y.Z` | — | `tagger.spec` + `.github/workflows/release.yml` (PyInstaller) → instalador Tauri (ADR 0001) na CI | testes rodam na CI (`.github/workflows/testes.yml`) | pendente |
 | O-02 | Rodar da fonte (`python -m tagger [caminhos]`) | — | `__main__.py` → `cargo tauri dev` | — | pendente |
-| O-03 | Chaves embutidas no build a partir de segredos (`chaves.json` gerado por `scripts/gerar_chaves.py`, nunca no repositório) | `credenciais.py` → `credenciais.rs` | `release.yml` → CI da v3 | `test_credenciais.py` (`gerar_chaves.py`) | pendente |
+| O-03 | Chaves embutidas no build a partir de segredos (`chaves.json` gerado por `scripts/gerar_chaves.py`, nunca no repositório) | `credenciais.py` → `credenciais.rs` | `release.yml` → CI da v3: mesmo esquema, valores embutidos no build a partir dos Secrets da CI, nunca no repositório | `test_credenciais.py` (`gerar_chaves.py`) | pendente |
 | O-04 | Suíte de testes sem rede e sem tocar nas configurações reais do usuário | — | `tests/conftest.py` → testes do `core/` e do `app/` | `test_qsettings.py` | pendente |
 
 ---
+
+**Plataforma:** só Windows até a fase 4. Os itens específicos do Windows (I-07, F-02, A-15, J-25) valem só no Windows.
 
 ## Fica na v2 e não vai para a v3
 
@@ -314,17 +310,19 @@ Janela `Ctrl+,` com 4 abas. Cada mudança é aplicada na hora (prévia ao vivo, 
 |---|---|
 | Busca online no **Last.fm** (fonte, campo de chave, guia de chave, "versão do álbum pela contagem de execuções") | Removido na 2.2.1 (mudança nos termos da API do Last.fm); a v3 não traz de volta. A chave salva por versões antigas é só apagada (ver J-24). |
 | Diálogo de busca só no MusicBrainz (`gui/busca.py`, `DialogoBusca`) | Substituído por `DialogoBuscaOnline` na 2.2; só restam helpers reaproveitados. Não é funcionalidade separada para o usuário. |
-| Seletor de arquivos em Tkinter na CLI | Detalhe de implementação da v1; depende da decisão sobre a CLI (ver abaixo). |
+| **CLI** (`python -m tagger.cli`, v1.0): menu Edição individual / Bulk edit / Sair (antiga N-01), edição individual com seletor nativo, lista `[editado]`, `Enter` cancela, `-` remove, `atual` = ano atual (N-02), e bulk edit de um campo de `CAMPOS_BULK` com confirmação `S/N` e relatório de falhas (N-03) | Decisão humana: a v3 é só desktop. Status `fora`. O seletor Tkinter some junto. |
 | PyInstaller, `tagger.spec`, `QSettings` no registro | Mecanismos da v2; a v3 usa o instalador do Tauri e as preferências do Tauri. O comportamento (preferências lembradas) fica nas linhas J-23 e I-06. |
 
-## Dúvidas para o orquestrador
+## Decisões
 
-1. **CLI (N-01 a N-03):** a v3 mantém uma linha de comando? Sem decisão, as linhas ficam `pendente` e podem ir para "fora" se a v3 só for desktop.
-2. **Migração de configurações:** quem já usa a v2 tem tudo no registro (`HKCU\Software\Tagger\Tagger`). A v3 importa isso na primeira execução (tema, colunas, recentes, padrões, token do Discogs) ou começa do zero?
-3. **Token do Discogs e chaves embutidas:** o `chaves.json` embutido da v2 vem de segredos da CI. O Tauri/Rust usa o mesmo esquema (arquivo embutido no build) ou outra forma de embutir a chave?
-4. **Área de transferência e arrastar (D-04, D-05, A-03):** dependem do que o WebView2 expõe; a paridade completa pode precisar de comandos no `src-tauri`. Aceitar diferenças pequenas?
-5. **Testes de interface (todas as linhas com `—` ou `GUI`):** a ADR 0001 deixa em aberto como testar a interface (componentes React e/ou WebDriver). Sem isso, o critério "ok com teste" das linhas de interface não é satisfazível.
-6. **Pasta dos testes de comportamento do núcleo:** os testes pytest da v2 são a especificação; vamos portá-los para `cargo test` (nomes iguais), ou rodar a v2 em paralelo como oráculo na CI (a ADR deixa a comparação com a v2 em aberto)?
-7. **Menus nativos e "Mostrar na pasta":** o Tauri revela o arquivo no Explorer só com plugin; confirmar o plugin aceito (A-15).
-8. **Plataformas:** a v2 só foi empacotada para Windows (barra de título escura, AppUserModelID, nomes reservados do Windows). A v3 mantém o foco em Windows até o Android? Os itens específicos de Windows (I-07, F-02) valem também no Android?
-9. **ID3v2.3 e o patch da lofty (K-01, K-06, K-10):** o comportamento depende de manter o patch do `TCON` (e do tratamento do cabeçalho estendido, lofty-rs #761); a paridade das linhas K-* só vale com isso decidido.
+Respostas às dúvidas da primeira versão desta matriz.
+
+1. **CLI:** não vai para a v3 (só desktop), decisão humana. As antigas N-01 a N-03 estão em "Fica na v2".
+2. **Migração de configurações:** a v3 importa as configurações da v2 do registro `HKCU\Software\Tagger\Tagger` na primeira execução, só leitura e sem apagar (linha J-25).
+3. **Chaves embutidas:** mesmo esquema da v2, com arquivo ou valores embutidos no build a partir dos Secrets da CI, nunca no repositório (O-03).
+4. **Área de transferência e arrastar (A-03, D-04, D-05):** buscar paridade; diferenças pequenas são aceitas se documentadas na própria linha.
+5. **Testes de interface:** vitest + React Testing Library para componentes; ponta a ponta (tauri-driver/WebDriver) avaliado depois. A linha de interface fica `ok` com teste de componente.
+6. **Especificação:** portar os testes pytest para `cargo test`, mapeados em `docs/paridade-testes.md`; a comparação com a v2 como oráculo é um extra.
+7. **Mostrar na pasta (A-15):** plugin oficial `tauri-plugin-opener`.
+8. **Plataforma:** só Windows até a fase 4; itens de Windows valem só no Windows.
+9. **ID3v2.3 (K-01, K-06, K-10):** decidido na ADR 0001 (patch do `TCON` + correção do #761 na lofty vendorizada).
