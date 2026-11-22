@@ -30,3 +30,9 @@ tagger/nucleo/chaves.json
 
 # Rust (workspace da v3)
 /target/
+
+# App (Tauri + React)
+node_modules/
+dist/
+target/
+app/src-tauri/gen/
