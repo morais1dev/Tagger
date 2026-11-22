@@ -45,29 +45,22 @@ O spike T2.1 montou um app mínimo em Tauri 2 + React + TypeScript com o núcleo
 - **(c) Aceitar a lofty como está, em v2.3.** Rejeitada. Corrompe um campo **não editado** (gênero multivalor) em qualquer gravação de MP3, o que viola o princípio da v2 de só mudar o que o usuário pediu.
 - **Serializador próprio só para o `TCON`** em vez do patch. Descartado: a lofty descarta `TCON` que não seja frame de texto, então seria preciso reescrever o frame no arquivo depois de gravar. Pela estimativa do spike, seria mais de 100 linhas e frágil, contra 9 linhas do patch.
 
+## Em aberto → Resolvido (T3.2a, 2026-11-22)
+
+- **Onde fica a lofty corrigida:** vendorizada em `third_party/lofty`, com as licenças dela (`LICENSE-MIT`, `LICENSE-APACHE`) e um `LEIAME-TAGGER.md` que lista cada alteração. Entra no workspace por `[patch.crates-io]` com `path` (`Cargo.toml` da raiz). O 1º commit da pasta é a crate como publicada; cada alteração do Tagger é um commit próprio, marcada no código com "Tagger:".
+- **Versão:** a 0.26 ainda não foi publicada no crates.io (o PR #777 foi mergeado upstream em 2026-11-02, sem release). Por isso a versão fica fixada em `=0.25.5`, com o backport da leitura do cabeçalho estendido do #777. O backport não inclui o modo estrito: flags desconhecidas são descartadas, o comportamento "relaxed" do upstream. Ao sair a 0.26, a pasta é trocada e só se reaplica o que ainda faltar.
+- **Achado no caminho:** com cabeçalho estendido, a 0.25.5 contava o cabeçalho estendido duas vezes no tamanho da tag, e regravar cortava o começo do áudio. Foi corrigido na cópia (`header.rs`, `id3/mod.rs`, `mpeg/read.rs`) e coberto por teste. Isso ainda não foi reportado upstream. O núcleo também deixa de regravar CRC/restrições de um cabeçalho estendido lido, porque a 0.25.5 os escreve sempre no layout do v2.4.
+- **Alcance do patch do `TCON`:** a limitação foi aceita por ora. O teste `genero_com_codigo_numerico_cai_no_caminho_original_da_lofty` documenta o comportamento (`Rock; 80` vira `(Rock)(80)`).
+- **Conversões implícitas:** a lofty lê **todos** os formatos com `implicit_conversions(false)`, não só o MP3. Com elas, um FLAC/Ogg com `TRACKNUMBER=3/12` seria dividido e um M4A com `gnre` seria convertido em qualquer gravação. As duas coisas têm teste.
+- **ID3v1:** um ID3v1 que já existe é atualizado a partir da v2 ao gravar, como o mutagen faz com `v1=1`. A lofty só regravava o v1 que leu, sem mudar o conteúdo.
+- **FLAC sem Vorbis comment:** quando não sobra nenhuma imagem, a lofty não grava nada. Para remover a capa nesse caso, o núcleo usa `TagType::VorbisComments.remove_from`.
+- **Testes de regressão:** ficam em `core/tests/regressoes.rs`, e a paridade com os testes pytest está em `docs/paridade-testes.md`.
+- **Formatos e funções:** o módulo `core/src/metadados/` cobre o que a v2 faz em `metadata.py` e `formatos/`. Isso inclui MP3, FLAC, Ogg Vorbis, Ogg Opus, M4A/MP4, todos os campos, definir e remover capa, `OpcoesGravacao` (`versao_id3`, `multivalor`, `remover_id3v1`) e a limpeza de extras. FLAC dentro de Ogg: veja "Em aberto".
+
 ## Em aberto
 
-- **Manter a lofty corrigida até o upstream aceitar.** Falta decidir onde fica a cópia corrigida: um fork em repositório próprio, ou o patch dentro deste repo aplicado por script, como no spike. Falta também definir quem revisa cada atualização e o que fazer se o upstream recusar o patch ou resolver de outro jeito.
-- **Versão da lofty.** Fixar `=0.25.5` (a versão do spike) mantém o bug [lofty-rs #761](https://github.com/Serial-ATA/lofty-rs/issues/761): na 0.25.5, o cabeçalho estendido de uma tag ID3v2.3 é lido com o layout do v2.4, nenhum frame é lido e gravar deixa só o que o app definiu. É outra perda de dados em v2.3, além das duas do spike. A correção está no [PR #777](https://github.com/Serial-ATA/lofty-rs/pull/777) (milestone 0.26.0). Opções:
-  - ir para a 0.26 e rebasear o patch do `TCON` sobre ela;
-  - ficar na 0.25.5 e trazer a correção do #777 para a cópia corrigida.
-
-  Em qualquer caso, entra um teste de regressão com cabeçalho estendido v2.3.
-- **Alcance do patch do `TCON`.** O patch só mantém os gêneros separados por nulo quando nenhum valor é código numérico do ID3v1 nem `RX`/`CR`. Fora disso, cai no caminho original da lofty: `Rock; 80` vira o texto `(Rock)(80)`, que o mutagen lê como um gênero só, literal. Falta decidir entre aceitar essa limitação (gênero numérico é raro e vem do ID3v1) ou ampliar o patch. Em qualquer caso, o caso precisa de teste de regressão.
-- **PR upstream.** Falta abrir o PR com o patch do `TCON` na lofty e registrar também o problema do `TDRC` na leitura (issue). O spike não encontrou nada aberto sobre nenhum dos dois; links relacionados estão em [docs/spike/tauri.md](../spike/tauri.md).
-- **Testes de regressão no núcleo da v3.** Os testes precisam cobrir:
-  - gênero multivalor que sobrevive a uma gravação em v2.3;
-  - `TDRC` com data completa em tag v2.3 que sobrevive a ler e gravar;
-  - `TYER`/`TDAT` de um v2.3 padrão intactos;
-  - tag v2.3 com cabeçalho estendido (#761);
-  - gênero com código numérico, conforme a decisão sobre o alcance do patch.
-
-  Falta decidir se a comparação com a v2 roda na CI (ela depende de Python + mutagen).
+- **FLAC dentro de Ogg:** a lofty não suporta. Vai ter implementação própria (via `ogg_pager`) como último item da T3.2a.
+- **PR upstream.** Falta abrir o PR com o patch do `TCON` na lofty e registrar como issues o problema do `TDRC` na leitura e o do tamanho da tag com cabeçalho estendido. O spike não encontrou nada aberto sobre os dois primeiros; links relacionados estão em [docs/spike/tauri.md](../spike/tauri.md).
+- **Comparação com a v2 na CI.** Falta decidir se `spike/tauri/scripts/comparar_v2.py` (ou uma versão para o `tagger-core`) roda na CI, já que depende de Python + mutagen.
 - **Interação do app sem teste automático.** O spike só conferiu que a janela abre. Falta escolher como testar a interface: testes de componentes React e/ou testes ponta a ponta com o WebDriver do Tauri.
 - **Tempo de build release (~5 min).** Falta avaliar se é aceitável na CI, ou se convém cache do `target/`, ou um perfil sem LTO para builds de teste.
-- **Formatos e funções fora do spike.** O spike cobriu título, artista, faixa, gravadora e capa (definir) em `.mp3`, `.flac` e `.m4a`. Para chegar ao que a v2 faz (`tagger/nucleo/metadata.py` e `formatos/`), faltam:
-  - **Formatos:** `.ogg` nas três variantes que a v2 abre (Vorbis, Opus e FLAC dentro do Ogg) e `.mp4`.
-  - **Campos:** álbum, artista do álbum, disco, ano, gênero, compositor, letrista, comentário e letra.
-  - **Capa:** remover a capa, não só definir.
-  - **Opções de gravação (`OpcoesGravacao`):** `remover_id3v1` e `multivalor` desligado. O spike só tem a versão do ID3 e o multivalor sempre ligado.
-  - **Limpeza de extras:** `analisar_extras` e `limpar_extras`, ou seja, ID3v1, frames desconhecidos e chaves que o Tagger não mostra.
