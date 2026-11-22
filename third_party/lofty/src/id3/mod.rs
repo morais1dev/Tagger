@@ -214,13 +214,16 @@ where
 	if let Ok(id3v2_header) = Id3v2Header::parse(reader) {
 		log::debug!("Found an ID3v2 tag, parsing");
 
+		// Tagger: o parse do cabeçalho já consumiu o cabeçalho estendido, que faz parte de `size`;
+		// sem descontar, o fim da tag passava do lugar e a regravação cortava o começo do áudio.
+		let restante = id3v2_header.size - id3v2_header.extended_size;
 		if config.read {
-			let mut tag = try_vec![0; id3v2_header.size as usize]?;
+			let mut tag = try_vec![0; restante as usize]?;
 			reader.read_exact(&mut tag)?;
 
 			id3v2 = Some(tag)
 		} else {
-			reader.seek(SeekFrom::Current(i64::from(id3v2_header.size)))?;
+			reader.seek(SeekFrom::Current(i64::from(restante)))?;
 		}
 
 		if id3v2_header.flags.footer {

@@ -59,7 +59,8 @@ where
 					}
 					file.id3v2_tag = Some(id3v2);
 				} else {
-					reader.seek(SeekFrom::Current(i64::from(header.size)))?;
+					// Tagger: o cabeçalho estendido já foi consumido (veja id3/mod.rs, find_id3v2)
+					reader.seek(SeekFrom::Current(i64::from(header.size - header.extended_size)))?;
 				}
 
 				// Skip over the footer

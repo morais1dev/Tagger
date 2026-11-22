@@ -173,6 +173,9 @@ impl Id3v2Header {
 							extended_size,
 						)?;
 					}
+					// Tagger: no v2.3 o tamanho não conta os 4 bytes dele mesmo; aqui `extended_size`
+					// passa a ser o que foi consumido, como no v2.4 (read.rs lê `size - extended_size`).
+					extended_size += 4;
 				},
 				// In ID3v2.4, they seem to be considered one big header (?) so no flags apply to it
 				Id3v2Version::V4 => {
@@ -201,7 +204,9 @@ impl Id3v2Header {
 
 	/// The total size of the tag, including the header, footer, and extended header
 	pub(crate) fn full_tag_size(&self) -> u32 {
-		self.size + 10 + self.extended_size + if self.flags.footer { 10 } else { 0 }
+		// Tagger: `size` já inclui o cabeçalho estendido (especificação do ID3v2); somar
+		// `extended_size` de novo cortava esses bytes do áudio ao regravar a tag.
+		self.size + 10 + if self.flags.footer { 10 } else { 0 }
 	}
 }
 
