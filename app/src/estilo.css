@@ -70,3 +70,48 @@ button:disabled { color: var(--faint); }
 .menu button { text-align: left; border: 0; background: transparent; }
 .menu button span { display: inline-block; width: 1.2em; }
 .menu hr { border: 0; border-top: 1px solid var(--line); width: 100%; }
+
+/* corpo: painel de edição | divisor | tabela */
+.corpo { flex: 1; min-height: 0; display: flex; }
+.coluna-painel { flex: none; min-width: 0; display: flex; }
+.area-tabela { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.divisor { flex: none; width: 7px; cursor: col-resize; background: linear-gradient(var(--line), var(--line)) center / 1px 100% no-repeat; }
+.divisor:hover { background-color: var(--hover); }
+.status { min-height: 22px; padding: 2px 12px; color: var(--muted); background: var(--surface); border-top: 1px solid var(--line); }
+
+/* painel de edição */
+.painel { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface); }
+.painel-corpo { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.painel-cabecalho h2 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.painel-cabecalho p { margin: 4px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+.painel-vazio { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--muted); padding: 24px; }
+.painel-vazio strong { color: var(--text); }
+.campo { display: flex; flex-direction: column; gap: 4px; }
+.campo label { color: var(--muted); font-size: 12px; }
+.campo-rotulo { display: flex; align-items: center; gap: 6px; }
+.campo input, .campo textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+.campo .invalido { border-color: var(--erro); }
+.erro-campo { color: var(--erro); font-size: 12px; }
+.campos-pares { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.marca { color: var(--acento); }
+.mono { font-family: "Geist Mono", "Cascadia Mono", Consolas, monospace; }
+.rodape-painel { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); }
+button.primario { background: var(--acento); color: var(--bg); border-color: transparent; font-weight: 600; }
+button.primario:hover:not(:disabled) { background: var(--acento); filter: brightness(1.1); }
+button.primario:disabled { background: var(--field); color: var(--faint); border-color: var(--line2); }
+
+/* capa */
+.bloco-capa { display: flex; gap: 12px; align-items: flex-start; }
+.quadro-capa {
+  flex: none; width: 112px; height: 112px; box-sizing: border-box; border: 2px solid var(--line2); border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--field); color: var(--muted); text-align: center;
+}
+.quadro-capa.arrastando { border-color: var(--acento); }
+.quadro-capa img { width: 100%; height: 100%; object-fit: cover; }
+.quadro-texto { padding: 4px; font-size: 12px; }
+.capa-lado { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.capa-info { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.capa-pendente { color: var(--text); }
+.capa-botoes { display: flex; gap: 6px; }
+button.icone { width: 32px; padding: 4px 0; }
+.menu button:disabled { color: var(--faint); }
