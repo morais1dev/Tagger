@@ -11,4 +11,3 @@ name = "tagger_core"
 
 [dependencies]
 lofty.workspace = true
-base64 = "0.22"

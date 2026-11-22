@@ -4,4 +4,4 @@
 //! (veja `docs/paridade-testes.md`).
 
 pub mod amostras;
-// pub mod metadados;  (em andamento: T3.2a)
+pub mod metadados;
