@@ -194,7 +194,14 @@ pub(super) fn aplicar_capa_flac(f: &mut FlacFile, capa: &AcaoCapa) {
 }
 
 pub(super) fn aplicar_capa_ogg(tag: &mut VorbisComments, capa: &AcaoCapa) {
+    // a capa nova substitui a antiga (COVERART, que a lofty já leu como imagem "outra"); ao remover,
+    // o COVERARTMIME só sai se não sobrar capa
+    let tinha_capa = !capas_ogg(tag).is_empty();
     aplicar(tag, capa);
+    if matches!(capa, AcaoCapa::Definir { .. }) || !tinha_capa || capas_ogg(tag).is_empty() {
+        apagar(tag, "COVERART");
+        apagar(tag, "COVERARTMIME");
+    }
 }
 
 // ---------------------------------------------------------------- limpeza
