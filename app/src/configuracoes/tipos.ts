@@ -105,7 +105,11 @@ export const CHAVES_DO_USUARIO = [
   "recentes_renomear", "recentes_organizar", "recentes_tags",
 ] as const satisfies ReadonlyArray<keyof Config>;
 
-/** Resultado da importação das configurações da v2 (J-25): só o tipo, o registro nunca é lido aqui. */
+/**
+ * Resultado da importação das configurações da v2 (J-25). A importação é automática, na 1ª execução,
+ * feita no núcleo/src-tauri (só leitura do registro, sem apagar); não há botão nem tela. O tipo existe
+ * para a ponte devolver o que foi trazido.
+ */
 export interface ImportacaoV2 {
   encontrada: boolean;
   /** Valores trazidos da v2, já no formato da v3. */

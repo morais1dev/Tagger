@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DialogoConfiguracoes, previaDe, restaurarPadroes } from "./DialogoConfiguracoes";
@@ -6,9 +6,9 @@ import { criarPonteSimulada } from "./ponteConfig";
 import { AVISO_SOBRE } from "./Sobre";
 import { ACENTO_DO_TEMA, copiarConfig, PADROES, type Config } from "./tipos";
 
-function abrir(inicial: Partial<Config> = {}, v2?: Parameters<typeof criarPonteSimulada>[1]) {
+function abrir(inicial: Partial<Config> = {}) {
   const config = { ...copiarConfig(PADROES), ...inicial };
-  const ponte = criarPonteSimulada(config, v2);
+  const ponte = criarPonteSimulada(config as unknown as Record<string, unknown>);
   const aoMudar = vi.fn();
   const aoFechar = vi.fn();
   const usuario = userEvent.setup();
@@ -93,17 +93,20 @@ describe("aba Aparência (J-02 a J-07)", () => {
     await usuario.click(screen.getByRole("button", { name: "Do tema" }));
     expect(ultima().acento).toBe(ACENTO_DO_TEMA);
 
-    await usuario.click(screen.getByRole("button", { name: "Personalizada…" }));
-    await usuario.type(screen.getByLabelText("Cor personalizada (#rrggbb)"), "12ab34");
+    expect(screen.getByLabelText("Cor personalizada")).toHaveAttribute("type", "color");
+    fireEvent.change(screen.getByLabelText("Cor personalizada"), { target: { value: "#12ab34" } });
     expect(ultima().acento).toBe("#12ab34");
+    expect(screen.getByRole("button", { name: "Personalizada…" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Do tema" })).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("cor personalizada inválida mostra o erro e não chega à configuração", async () => {
-    const { usuario, aoMudar } = abrir();
+  it("'Personalizada…' abre o seletor de cor do sistema", async () => {
+    const { usuario } = abrir();
+    const seletor = screen.getByLabelText("Cor personalizada") as HTMLInputElement;
+    const abrirSeletor = vi.fn();
+    seletor.showPicker = abrirSeletor;
     await usuario.click(screen.getByRole("button", { name: "Personalizada…" }));
-    await usuario.type(screen.getByLabelText("Cor personalizada (#rrggbb)"), "12zz");
-    expect(screen.getByRole("alert")).toHaveTextContent("Cor inválida");
-    expect(aoMudar).not.toHaveBeenCalled();
+    expect(abrirSeletor).toHaveBeenCalledTimes(1);
   });
 
   it("fontes: Automática mais as instaladas", async () => {
@@ -297,6 +300,7 @@ describe("Restaurar padrões (J-21)", () => {
 describe("Sobre (L-04) e rodapé", () => {
   it("o botão abre o Sobre com versão, fontes dos dados e o aviso do Discogs; Fechar volta às Configurações", async () => {
     const { usuario } = abrir();
+    expect(screen.getByRole("button", { name: "Sobre o Tagger" })).toHaveAttribute("title", "Versão, serviços online e avisos (F1)");
     await usuario.click(screen.getByRole("button", { name: "Sobre o Tagger" }));
     const sobre = await screen.findByRole("dialog", { name: "Sobre o Tagger" });
     expect(sobre).toHaveTextContent("Tagger 3.0.0-dev");
@@ -319,22 +323,9 @@ describe("Sobre (L-04) e rodapé", () => {
   });
 });
 
-describe("Importar da v2 (J-25, só interface)", () => {
-  it("sem configuração da v2, avisa e não muda nada", async () => {
-    const { usuario, aoMudar } = abrir();
-    await usuario.click(screen.getByRole("button", { name: "Importar da v2" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Nenhuma configuração da v2");
-    expect(aoMudar).not.toHaveBeenCalled();
-  });
-
-  it("com configuração da v2, aplica, conta e lista o que foi ignorado, sem apagar nada", async () => {
-    const v2 = { encontrada: true, config: { tema_escuro: "dracula", tamanho_fonte: 15, subpastas: false }, ignoradas: ["lastfm_api_key"] };
-    const { usuario, ultima } = abrir({}, v2);
-    await usuario.click(screen.getByRole("button", { name: "Importar da v2" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("3 configuração(ões) da v2 importadas. Nada foi apagado da v2. 1 opção(ões)");
-    expect(ultima().tema_escuro).toBe("dracula");
-    expect(ultima().tamanho_fonte).toBe(15);
-    expect(ultima().subpastas).toBe(false);
-    expect(screen.getByLabelText("Tema escuro")).toHaveValue("dracula");
+describe("J-25: a importação da v2 é automática", () => {
+  it("não há botão de importar na janela", () => {
+    abrir();
+    expect(screen.queryByRole("button", { name: /importar/i })).not.toBeInTheDocument();
   });
 });

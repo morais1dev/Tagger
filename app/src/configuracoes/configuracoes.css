@@ -32,7 +32,7 @@
 .cfg-amostra { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
 .cfg-amostra[aria-pressed="true"] { border-color: var(--text); }
 .cfg-botoes-cor { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.cfg-cor-livre { display: flex; align-items: center; gap: 8px; }
+.cfg-cor-seletor { width: 24px; height: 24px; padding: 0; border: 1px solid var(--line2); border-radius: 50%; background: none; cursor: pointer; }
 .cfg-numero { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cfg-capa { display: flex; align-items: center; gap: 12px; }
 .cfg-sufixo { color: var(--muted); }

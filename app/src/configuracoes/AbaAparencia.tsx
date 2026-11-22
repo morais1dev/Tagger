@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useRef } from "react";
 import { TEMAS } from "../temas";
 import { Ajuda, CampoNumero, Linha } from "./Campos";
 import { ACENTO_DO_TEMA, ACENTOS, DENSIDADES, TAMANHO_FONTE, type Config, type Densidade } from "./tipos";
@@ -15,11 +15,9 @@ function temas(escuro: boolean) {
   return Object.entries(TEMAS).filter(([, t]) => t.escuro === escuro);
 }
 
+/** "Personalizada…" abre o seletor de cor do sistema (como o QColorDialog da v2); o valor fica em #rrggbb. */
 function CorPersonalizada({ acento, mudar }: { acento: string; mudar: PropsAba["mudar"] }) {
-  const id = useId();
-  const [aberto, setAberto] = useState(false);
-  const [texto, setTexto] = useState(corValida(acento) ? acento : "#");
-  const invalido = !corValida(texto);
+  const campo = useRef<HTMLInputElement>(null);
   const personalizada = acento !== ACENTO_DO_TEMA && !ACENTOS.some((a) => a.cor === acento.toLowerCase());
   return (
     <>
@@ -28,27 +26,31 @@ function CorPersonalizada({ acento, mudar }: { acento: string; mudar: PropsAba["
         className="cfg-botao"
         aria-pressed={personalizada}
         title="Escolher qualquer cor"
-        onClick={() => setAberto((a) => !a)}
+        onClick={() => {
+          const el = campo.current;
+          if (!el) return;
+          if (typeof el.showPicker === "function") {
+            try {
+              el.showPicker();
+              return;
+            } catch {
+              /* sem gesto do usuário ou sem suporte: cai no click() */
+            }
+          }
+          el.click();
+        }}
       >
         Personalizada…
       </button>
-      {aberto && (
-        <span className="cfg-cor-livre">
-          <input
-            id={id}
-            type="text"
-            aria-label="Cor personalizada (#rrggbb)"
-            aria-invalid={invalido}
-            value={texto}
-            maxLength={7}
-            onChange={(e) => {
-              setTexto(e.target.value);
-              if (corValida(e.target.value)) mudar({ acento: e.target.value.toLowerCase() });
-            }}
-          />
-          {invalido && <span role="alert" className="cfg-erro">Cor inválida. Use o formato #rrggbb.</span>}
-        </span>
-      )}
+      <input
+        ref={campo}
+        type="color"
+        className="cfg-cor-seletor"
+        aria-label="Cor personalizada"
+       
+        value={corValida(acento) ? acento.toLowerCase() : "#3ddc97"}
+        onChange={(e) => mudar({ acento: e.target.value.toLowerCase() })}
+      />
     </>
   );
 }

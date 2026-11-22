@@ -6,7 +6,7 @@ import { AbaTags } from "./AbaTags";
 import type { PonteConfig } from "./ponteConfig";
 import { Sobre } from "./Sobre";
 import {
-  CHAVES_CREDENCIAL, CHAVES_DO_USUARIO, copiarConfig, PADROES, type Config, type ImportacaoV2,
+  CHAVES_CREDENCIAL, CHAVES_DO_USUARIO, copiarConfig, PADROES, type Config,
 } from "./tipos";
 import { normalizarConfig } from "./validacao";
 import "./configuracoes.css";
@@ -32,13 +32,6 @@ export function restaurarPadroes(atual: Config): Config {
   return novo;
 }
 
-function resumoImportacao(r: ImportacaoV2): string {
-  if (!r.encontrada) return "Nenhuma configuração da v2 foi encontrada neste computador.";
-  const n = Object.keys(r.config).length;
-  const ignoradas = r.ignoradas.length ? ` ${r.ignoradas.length} opção(ões) que não existem mais foram ignoradas.` : "";
-  return `${n} configuração(ões) da v2 importadas. Nada foi apagado da v2.${ignoradas}`;
-}
-
 export interface PropsDialogo {
   /** Configuração atual quando a janela abre. */
   config: Config;
@@ -56,7 +49,6 @@ export function DialogoConfiguracoes({ config: inicial, ponte, aoMudar, aoFechar
   const [aba, setAba] = useState<number>(0);
   const [fontes, setFontes] = useState<string[]>([]);
   const [sobre, setSobre] = useState<string | null>(null);
-  const [importacao, setImportacao] = useState("");
   const [salvando, setSalvando] = useState(false);
 
   useEffect(() => {
@@ -89,12 +81,6 @@ export function DialogoConfiguracoes({ config: inicial, ponte, aoMudar, aoFechar
 
   async function abrirSobre() {
     setSobre((await ponte.sobre()).versao);
-  }
-
-  async function importar() {
-    const r = await ponte.importarDaV2();
-    if (r.encontrada) aplicar(normalizarConfig({ ...config, ...r.config }));
-    setImportacao(resumoImportacao(r));
   }
 
   const abaAtual = [
@@ -138,16 +124,13 @@ export function DialogoConfiguracoes({ config: inicial, ponte, aoMudar, aoFechar
           {abaAtual}
         </div>
 
-        {importacao && <p role="status" className="cfg-ajuda">{importacao}</p>}
-
         <div className="cfg-rodape">
           <button type="button" className="cfg-botao cfg-fantasma" onClick={() => aplicar(restaurarPadroes(config))}>
             Restaurar padrões
           </button>
-          <button type="button" className="cfg-botao cfg-fantasma" onClick={abrirSobre}>Sobre o Tagger</button>
-          <button type="button" className="cfg-botao cfg-fantasma" onClick={importar}
-            title="Traz as configurações da v2 (só leitura, nada é apagado)">
-            Importar da v2
+          <button type="button" className="cfg-botao cfg-fantasma" onClick={abrirSobre}
+            title="Versão, serviços online e avisos (F1)">
+            Sobre o Tagger
           </button>
           <span className="cfg-espaco" />
           <button type="button" className="cfg-botao" onClick={cancelar}>Cancelar</button>
