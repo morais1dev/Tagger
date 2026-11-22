@@ -2,7 +2,7 @@
 
 Lista de tudo o que um usuário consegue fazer na v2.3 (Python + PySide6), com o módulo de núcleo e o componente de interface previstos na v3 e o teste que hoje cobre cada item. A v3 só está pronta quando todas as linhas estiverem como `ok`, ou explicitamente movidas para "Fica fora da v3".
 
-**Fontes cruzadas:** `CHANGELOG.md` (1.0.0 a 2.3.0), `readme.md`, `docs/ARQUITETURA.md`, `tagger/cli.py` e o código de `tagger/gui/` e `tagger/nucleo/` (menus, atalhos, diálogos, Configurações). Os testes pytest da v2 (`tests/`) são a especificação do comportamento; a v2 fica no `main` até a v3.0.
+**Fontes cruzadas:** `CHANGELOG.md` (1.0.0 a 2.3.0), `readme.md`, `docs/ARQUITETURA.md`, `tagger/cli.py` e o código de `tagger/gui/` e `tagger/nucleo/` (menus, atalhos, diálogos, Configurações). Os testes pytest da v2 (`tests/`) são a especificação do comportamento; a v2 fica no `main` até a v3.0. A v2 está preservada no branch `v2` (`origin/v2` = `c6ad9f7`, tag `v2.3.0`); o código Python continua no `main` só como especificação e oráculo até a v3.0.
 
 ## Como ler
 
@@ -252,8 +252,8 @@ Janela `Ctrl+,` com 4 abas. Cada mudança é aplicada na hora (prévia ao vivo, 
 | J-21 | "Restaurar padrões" (aparência, comportamento e tags; **não** apaga os padrões de nome recentes nem a chave colada) | `config.PADROES` → `config.rs` | `configuracoes._restaurar_padroes` | — | pendente |
 | J-22 | Botão "Sobre o Tagger" dentro das Configurações | ver L-04 | `configuracoes._sobre` | — | pendente |
 | J-23 | Preferências salvas entre sessões (v2: `QSettings`, registro do Windows) e padrões de nome com recentes: `padrao_renomear`, `padrao_tags`, `padrao_organizar`, `recentes_*` | `config.rs` | preferências na ponte Tauri | `test_qsettings.py` | pendente |
-| J-25 | Importar as configurações da v2 na primeira execução da v3: lê (só leitura, sem apagar nada) o registro `HKCU\Software\Tagger\Tagger` e traz tema, cores, fontes, comportamento, opções de tags, gêneros, padrões e recentes, pastas recentes, colunas e geometria quando possível e o token do Discogs; chaves antigas (Last.fm) não são importadas | `config.rs` (leitura do registro, só Windows) | `app/src-tauri` (leitura) → `Configuracoes` (aviso do que foi importado) | — | pendente |
 | J-24 | Chave antiga do Last.fm apagada das preferências ao iniciar (limpeza de migração da v2.2.1/2.3.0) | `config.CHAVES_ANTIGAS` → `config.rs` | — | `test_atribuicao.py` (`test_carregar_config_remove_a_chave_antiga_do_lastfm`) | pendente |
+| J-25 | Importar as configurações da v2 na primeira execução da v3: lê (só leitura, sem apagar nada) o registro `HKCU\Software\Tagger\Tagger` e traz tema, cores, fontes, comportamento, opções de tags, gêneros, padrões e recentes, pastas recentes, colunas e geometria quando possível e o token do Discogs; chaves antigas (Last.fm) não são importadas | `config.rs` (leitura do registro, só Windows) | `app/src-tauri` (leitura) → `Configuracoes` (aviso do que foi importado) | — | pendente |
 
 ## K. Formatos e tags
 
@@ -268,7 +268,7 @@ Janela `Ctrl+,` com 4 abas. Cada mudança é aplicada na hora (prévia ao vivo, 
 | K-07 | Gravadora (`TPUB`, `ORGANIZATION`/`LABEL`, átomo `LABEL`) em todos os formatos, com prioridade de `ORGANIZATION` sobre `LABEL` na leitura | tags → `tags.rs` | — | `test_metadata.py` (`test_gravadora_mp3`, `test_gravadora_outro_gravar_e_apagar`, `test_gravadora_vorbis_le_label`, `test_gravadora_vorbis_organization_tem_prioridade`) | pendente |
 | K-08 | Valores comuns de uma seleção para o painel (campos iguais ou "vários") | `metadata.valores_comuns` → `tags.rs` | — | `test_metadata.py` (`test_valores_comuns`) | pendente |
 | K-09 | Duração e bitrate lidos (bitrate estimado pelo tamanho quando o leitor não informa) | `metadata._bitrate` → `tags.rs` | — | `test_metadata.py` (`test_bitrate_*`) | pendente |
-| K-10 | Comparação byte a byte com a v2 nos mesmos arquivos (critério de aceite do núcleo, ADR 0001) | todos | — | — (script de comparação previsto na ADR) | pendente |
+| K-10 | Comparação com a v2 nos mesmos arquivos (`comparar_v2.py` ou equivalente): compara o que o mutagen lê — frames, valores, imagens e versão da tag —, não bytes; é critério de aceite do núcleo (ADR 0001), além do porte dos pytest | todos | — | — (script de comparação previsto na ADR) | pendente |
 
 ## L. Avisos, erros, sobre e versão
 
@@ -322,7 +322,7 @@ Respostas às dúvidas da primeira versão desta matriz.
 3. **Chaves embutidas:** mesmo esquema da v2, com arquivo ou valores embutidos no build a partir dos Secrets da CI, nunca no repositório (O-03).
 4. **Área de transferência e arrastar (A-03, D-04, D-05):** buscar paridade; diferenças pequenas são aceitas se documentadas na própria linha.
 5. **Testes de interface:** vitest + React Testing Library para componentes; ponta a ponta (tauri-driver/WebDriver) avaliado depois. A linha de interface fica `ok` com teste de componente.
-6. **Especificação:** portar os testes pytest para `cargo test`, mapeados em `docs/paridade-testes.md`; a comparação com a v2 como oráculo é um extra.
+6. **Especificação:** portar os testes pytest para `cargo test`, mapeados em `docs/paridade-testes.md` (regra do ROADMAP). A comparação com a v2 (`comparar_v2.py`) também é critério de aceite do núcleo, conforme a ADR 0001, e não um extra (K-10).
 7. **Mostrar na pasta (A-15):** plugin oficial `tauri-plugin-opener`.
 8. **Plataforma:** só Windows até a fase 4; itens de Windows valem só no Windows.
-9. **ID3v2.3 (K-01, K-06, K-10):** decidido na ADR 0001 (patch do `TCON` + correção do #761 na lofty vendorizada).
+9. **ID3v2.3 (K-01, K-06, K-10):** escolha feita na T3.2a: lofty 0.25.5 (a 0.26 não foi publicada) com backport do PR #777 e o patch do `TCON` em `third_party/lofty` (branch `feat/t3-2-nucleo-metadados`, commits `2f89a0c` e `5c69584`); será registrada na seção Resolvido da ADR 0001 pelo terminal 27.
