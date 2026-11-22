@@ -2,7 +2,7 @@
 
 Lista de tudo o que um usuário consegue fazer na v2.3 (Python + PySide6), com o módulo de núcleo e o componente de interface previstos na v3 e o teste que hoje cobre cada item. A v3 só está pronta quando todas as linhas estiverem como `ok`, ou explicitamente movidas para "Fica fora da v3".
 
-**Fontes cruzadas:** `CHANGELOG.md` (1.0.0 a 2.3.0), `readme.md`, `docs/ARQUITETURA.md`, `tagger/cli.py` e o código de `tagger/gui/` e `tagger/nucleo/` (menus, atalhos, diálogos, Configurações). Os testes pytest da v2 (`tests/`) são a especificação do comportamento; a v2 fica no `main` até a v3.0. A v2 está preservada no branch `v2` (`origin/v2` = `c6ad9f7`, tag `v2.3.0`); o código Python continua no `main` só como especificação e oráculo até a v3.0.
+**Fontes cruzadas:** `CHANGELOG.md` (1.0.0 a 2.3.0), `readme.md`, `docs/ARQUITETURA.md`, `tagger/cli.py` e o código de `tagger/gui/` e `tagger/nucleo/` (menus, atalhos, diálogos, Configurações). Os testes pytest da v2 (`tests/`) são a especificação do comportamento. A v2 está preservada no branch `v2` (`origin/v2` = `c6ad9f7`, tag `v2.3.0`); o código Python continua no `main` só como especificação e oráculo até a v3.0.
 
 ## Como ler
 
