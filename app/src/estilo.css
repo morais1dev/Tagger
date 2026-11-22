@@ -45,6 +45,8 @@ button:disabled { color: var(--faint); }
 .alca:hover { background: var(--line2); }
 .linha { height: 34px; border-bottom: 1px solid transparent; cursor: default; }
 .linha:hover { background: var(--hover); }
+/* arrastar para selecionar linhas não pode selecionar o texto das células (WebView2 pintaria de azul) */
+.tabela-corpo { user-select: none; -webkit-user-select: none; }
 .linha.foco { box-shadow: inset 2px 0 0 var(--acento); }
 .linha.selecionada { background: color-mix(in srgb, var(--acento) 22%, transparent); }
 .celula { padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: 100%; display: flex; align-items: center; }
