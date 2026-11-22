@@ -19,9 +19,11 @@ describe("temas", () => {
     expect(contraste("#777777", "#777777")).toBeCloseTo(1, 5);
   });
 
+  // text e muted precisam ler bem sobre o fundo e sobre cada superfície onde a interface os desenha
   describe.each(Object.entries(TEMAS))("%s", (id, tema) => {
-    it.each(["text", "muted"])(`${id}: %s sobre o fundo tem contraste ≥ ${MINIMO}:1`, (token) => {
-      expect(contraste(tema.cores[token], tema.cores.bg)).toBeGreaterThanOrEqual(MINIMO);
+    it.each(["bg", "surface", "surface2", "field", "hover"])(`${id}: text e muted sobre %s têm contraste ≥ ${MINIMO}:1`, (fundo) => {
+      expect(contraste(tema.cores.text, tema.cores[fundo])).toBeGreaterThanOrEqual(MINIMO);
+      expect(contraste(tema.cores.muted, tema.cores[fundo])).toBeGreaterThanOrEqual(MINIMO);
     });
   });
 });
