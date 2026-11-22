@@ -87,7 +87,16 @@ where
 			// that is supported in ID3v2.3
 			//
 			// TDRC (Recording time) gets split into three frames: TYER, TDAT, and TIME
-			"TDOR" | "TDRC" => {
+			// Tagger (patch): o TDRC é gravado como está também no v2.3, como o mutagen faz. Convertê-lo
+			// em TYER/TDAT/TIME perde precisão ("2001-05" vira "2001"; os segundos somem) e um TDRC de
+			// texto era descartado.
+			"TDRC" => {
+				if let Some(value) = frame.as_bytes(&mut ctx)? {
+					write_frame(writer, frame.id().as_str(), frame.flags(), &value, write_options)?;
+				}
+				continue;
+			},
+			"TDOR" => {
 				let is_tdor = frame.id_str() == "TDOR";
 
 				let Frame::Timestamp(f) = &mut frame else {

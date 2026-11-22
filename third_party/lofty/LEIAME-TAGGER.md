@@ -18,4 +18,8 @@ Alterações do Tagger, cada uma num commit próprio, marcadas no código com "T
    do áudio. Descoberto pelo teste `id3v23_com_cabecalho_estendido_e_lido_e_regravado` do
    tagger-core; ainda não reportado upstream.
 
+4. `src/id3/v2/write/frame.rs` (`create_items_v3`): o `TDRC` é gravado como está também em ID3v2.3,
+   como o mutagen (e a v2 do Tagger) faz. A conversão em `TYER`/`TDAT`/`TIME` perdia precisão
+   ("2001-05" virava "2001", os segundos sumiam) e um `TDRC` de texto era descartado.
+
 Para atualizar: trocar a pasta pela versão nova e reaplicar o que ainda não estiver no upstream.
