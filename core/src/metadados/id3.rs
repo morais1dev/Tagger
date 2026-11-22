@@ -246,6 +246,14 @@ pub(super) fn gravar_mp3(
         let novo = id3v1_da_v2(v2, v1);
         arquivo.set_id3v1(novo);
     }
+    if let Some(tag) = arquivo.id3v2_mut() {
+        // O CRC/restrições de um cabeçalho estendido lido não são regravados: a lofty 0.25.5 escreve o
+        // cabeçalho estendido sempre no layout do v2.4, o que corromperia uma tag v2.3.
+        let mut flags = *tag.flags();
+        flags.crc = false;
+        flags.restrictions = None;
+        tag.set_flags(flags);
+    }
     if arquivo.id3v2().is_none() {
         // só havia o ID3v1 (limpeza)
         if remover_v1 {
