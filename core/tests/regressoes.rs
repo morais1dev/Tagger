@@ -90,6 +90,27 @@ fn tdrc_com_data_completa_em_id3v23_sobrevive() {
 }
 
 #[test]
+fn tdrc_parcial_ou_com_hora_em_id3v23_nao_perde_precisao() {
+    // revisão da T3.2a: converter em TYER/TDAT/TIME perdia o mês sem dia e os segundos
+    for data in ["2001-05", "2001-05-06T10:20:30", "2001"] {
+        let a = amostra("mp3");
+        mp3_com_tag_v23(&a, &[("TIT2", "T"), ("TDRC", data)], false);
+        salvar(&a, &[(Campo::Titulo, "X")], None, PADRAO).unwrap();
+        assert_eq!(campo(&a, Campo::Data), data);
+        let tag = id3(&a).unwrap();
+        assert_eq!(ids(&tag), ["TDRC", "TIT2"], "{data}: TDRC fica como está, sem TYER/TDAT/TIME");
+    }
+}
+
+#[test]
+fn data_gravada_em_id3v23_fica_em_tdrc_como_na_v2() {
+    let a = amostra("mp3");
+    salvar(&a, &[(Campo::Data, "2024-05-17")], None, PADRAO).unwrap();
+    assert_eq!(versao_id3(&a), 3);
+    assert_eq!(ids(&id3(&a).unwrap()), ["TDRC"]);
+}
+
+#[test]
 fn tyer_tdat_de_um_id3v23_padrao_ficam() {
     let a = amostra("mp3");
     mp3_com_tag_v23(&a, &[("TIT2", "T"), ("TYER", "1999"), ("TDAT", "0605"), ("TORY", "1998")], false);
