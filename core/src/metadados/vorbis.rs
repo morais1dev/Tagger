@@ -98,11 +98,10 @@ pub(super) fn ler(tag: &VorbisComments, campo: Campo) -> Vec<String> {
     }
     if !totais(campo).is_empty() {
         let mut numero = valores[0].clone();
-        if !numero.contains('/') {
-            if let Some(total) = totais(campo).iter().find_map(|c| tag.get(c)).filter(|t| !t.is_empty()) {
+        if !numero.contains('/')
+            && let Some(total) = totais(campo).iter().find_map(|c| tag.get(c)).filter(|t| !t.is_empty()) {
                 numero = format!("{numero}/{total}");
             }
-        }
         return vec![numero];
     }
     valores

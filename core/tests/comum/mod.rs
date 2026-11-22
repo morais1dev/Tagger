@@ -36,7 +36,7 @@ pub fn pasta() -> PathBuf {
 
 /// Arquivo sem tags do formato pedido ("opus" vira um .ogg com Opus dentro).
 pub fn amostra(fmt: &str) -> PathBuf {
-    let ext = if fmt == "opus" { "ogg" } else { fmt };
+    let ext = if fmt == "opus" || fmt == "oggflac" { "ogg" } else { fmt };
     let caminho = pasta().join(format!("musica.{ext}"));
     amostras::criar(fmt, &caminho).unwrap();
     caminho

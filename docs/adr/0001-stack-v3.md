@@ -55,11 +55,11 @@ O spike T2.1 montou um app mínimo em Tauri 2 + React + TypeScript com o núcleo
 - **ID3v1:** um ID3v1 que já existe é atualizado a partir da v2 ao gravar, como o mutagen faz com `v1=1`. A lofty só regravava o v1 que leu, sem mudar o conteúdo.
 - **FLAC sem Vorbis comment:** quando não sobra nenhuma imagem, a lofty não grava nada. Para remover a capa nesse caso, o núcleo usa `TagType::VorbisComments.remove_from`.
 - **Testes de regressão:** ficam em `core/tests/regressoes.rs`, e a paridade com os testes pytest está em `docs/paridade-testes.md`.
-- **Formatos e funções:** o módulo `core/src/metadados/` cobre o que a v2 faz em `metadata.py` e `formatos/`. Isso inclui MP3, FLAC, Ogg Vorbis, Ogg Opus, M4A/MP4, todos os campos, definir e remover capa, `OpcoesGravacao` (`versao_id3`, `multivalor`, `remover_id3v1`) e a limpeza de extras. FLAC dentro de Ogg: veja "Em aberto".
+- **Formatos e funções:** o módulo `core/src/metadados/` cobre o que a v2 faz em `metadata.py` e `formatos/`. Isso inclui MP3, FLAC, Ogg Vorbis, Ogg Opus, M4A/MP4, todos os campos, definir e remover capa, `OpcoesGravacao` (`versao_id3`, `multivalor`, `remover_id3v1`) e a limpeza de extras.
+- **FLAC dentro de Ogg:** a lofty não suporta, então há implementação própria sobre o `ogg_pager` (`core/src/metadados/oggflac.rs`, ~170 linhas). Ela troca só o pacote dos comentários, repagina o cabeçalho e copia as páginas de áudio, refazendo apenas a sequência e o CRC. Testes em `core/tests/oggflac.rs`.
 
 ## Em aberto
 
-- **FLAC dentro de Ogg:** a lofty não suporta. Vai ter implementação própria (via `ogg_pager`) como último item da T3.2a.
 - **PR upstream.** Falta abrir o PR com o patch do `TCON` na lofty e registrar como issues o problema do `TDRC` na leitura e o do tamanho da tag com cabeçalho estendido. O spike não encontrou nada aberto sobre os dois primeiros; links relacionados estão em [docs/spike/tauri.md](../spike/tauri.md).
 - **Comparação com a v2 na CI.** Falta decidir se `spike/tauri/scripts/comparar_v2.py` (ou uma versão para o `tagger-core`) roda na CI, já que depende de Python + mutagen.
 - **Interação do app sem teste automático.** O spike só conferiu que a janela abre. Falta escolher como testar a interface: testes de componentes React e/ou testes ponta a ponta com o WebDriver do Tauri.

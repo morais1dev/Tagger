@@ -75,6 +75,42 @@ pub fn opus(caminho: &Path) -> io::Result<()> {
     std::fs::write(caminho, gravar_ogg(&paginas))
 }
 
+/// FLAC dentro de Ogg (não há gerador na v2): cabeçalho 0x7F "FLAC" com o STREAMINFO do [`flac`];
+/// um bloco VORBIS_COMMENT vazio; um pacote de "áudio" com a posição final.
+pub fn oggflac(caminho: &Path) -> io::Result<()> {
+    oggflac_com(caminho, &[])
+}
+
+/// Como [`oggflac`], com estes itens ("CHAVE", "valor") no VORBIS_COMMENT.
+pub fn oggflac_com(caminho: &Path, itens: &[(&str, &str)]) -> io::Result<()> {
+    let taxa: u64 = 44100;
+    let mut info = Vec::new();
+    info.extend_from_slice(&4096u16.to_be_bytes());
+    info.extend_from_slice(&4096u16.to_be_bytes());
+    info.extend_from_slice(&[0; 6]);
+    info.extend_from_slice(&((taxa << 44) | (1 << 41) | (15 << 36) | (taxa * 2)).to_be_bytes());
+    info.extend_from_slice(&[0; 16]);
+    let mut cabecalho = b"\x7fFLAC\x01\x00".to_vec();
+    cabecalho.extend_from_slice(&1u16.to_be_bytes()); // 1 pacote de cabeçalho depois deste
+    cabecalho.extend_from_slice(b"fLaC");
+    cabecalho.push(0x00); // STREAMINFO, não é o último bloco
+    cabecalho.extend_from_slice(&(info.len() as u32).to_be_bytes()[1..]);
+    cabecalho.extend_from_slice(&info);
+    let mut corpo = 6u32.to_le_bytes().to_vec();
+    corpo.extend_from_slice(b"Tagger");
+    corpo.extend_from_slice(&(itens.len() as u32).to_le_bytes());
+    for (chave, valor) in itens {
+        let item = format!("{chave}={valor}");
+        corpo.extend_from_slice(&(item.len() as u32).to_le_bytes());
+        corpo.extend_from_slice(item.as_bytes());
+    }
+    let mut comentarios = vec![0x84]; // VORBIS_COMMENT, último bloco
+    comentarios.extend_from_slice(&(corpo.len() as u32).to_be_bytes()[1..]);
+    comentarios.extend(corpo);
+    let paginas = [(vec![cabecalho], 0u64), (vec![comentarios], 0), (vec![vec![0xff; 100]], taxa * 2)];
+    std::fs::write(caminho, gravar_ogg(&paginas))
+}
+
 fn atomo(nome: &[u8; 4], conteudo: &[u8]) -> Vec<u8> {
     let mut a = ((8 + conteudo.len()) as u32).to_be_bytes().to_vec();
     a.extend_from_slice(nome);
@@ -103,13 +139,14 @@ pub fn m4a(caminho: &Path) -> io::Result<()> {
     std::fs::write(caminho, dados)
 }
 
-/// Cria o arquivo do formato pedido ("mp3", "flac", "ogg", "opus" ou "m4a").
+/// Cria o arquivo do formato pedido ("mp3", "flac", "ogg", "opus", "oggflac" ou "m4a").
 pub fn criar(formato: &str, caminho: &Path) -> io::Result<()> {
     match formato {
         "mp3" => mp3(caminho),
         "flac" => flac(caminho),
         "ogg" => ogg(caminho),
         "opus" => opus(caminho),
+        "oggflac" => oggflac(caminho),
         "m4a" | "mp4" => m4a(caminho),
         _ => Err(io::Error::new(io::ErrorKind::InvalidInput, format!("formato desconhecido: {formato}"))),
     }

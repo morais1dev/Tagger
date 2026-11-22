@@ -93,6 +93,10 @@ Casos que a v2 não precisava testar (o mutagen não tem esses problemas), mas a
 | `vorbis_tracknumber_com_barra_fica_como_esta` | sem conversões implícitas: `TRACKNUMBER=3/12` não é dividido |
 | `mp4_gnre_antigo_e_lido_e_preservado` | sem conversões implícitas: `gnre` lido como gênero e só trocado quando o gênero é gravado |
 
+## Só na v3: core/tests/oggflac.rs
+
+A v2 abre FLAC dentro de Ogg pelo mutagen, mas não tem gerador nem teste desse formato. Na v3 ele tem implementação própria e estes testes, que seguem os da fixture `outro`: `oggflac_sem_tags`, `oggflac_ler_nao_grava`, `oggflac_salvar_e_reler`, `oggflac_comentario_grande_ocupa_varias_paginas`, `oggflac_capa_definir_trocar_remover` e `oggflac_analisar_e_limpar_extras`. Todos conferem a sequência e o CRC das páginas, e que o áudio fica intacto.
+
 ## Diferenças conhecidas em relação à v2
 
 - **Tag vazia:** a lofty não grava uma tag ID3v2 nem um Vorbis comment de FLAC sem itens; o cabeçalho/bloco some. O mutagen mantém o cabeçalho vazio.

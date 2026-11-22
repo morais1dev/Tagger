@@ -61,7 +61,7 @@ fn par(tag: &Ilst, campo: Campo) -> (Option<u32>, Option<u32>) {
 pub(super) fn ler(tag: &Ilst, campo: Campo) -> Vec<String> {
     if matches!(campo, Campo::Faixa | Campo::Disco) {
         return match par(tag, campo) {
-            (Some(n), _) if n == 0 => Vec::new(),
+            (Some(0), _) => Vec::new(),
             (Some(n), Some(t)) if t > 0 => vec![format!("{n}/{t}")],
             (Some(n), _) => vec![n.to_string()],
             _ => Vec::new(),

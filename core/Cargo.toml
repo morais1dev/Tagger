@@ -11,6 +11,8 @@ name = "tagger_core"
 
 [dependencies]
 lofty.workspace = true
+ogg_pager = "0.8"   # FLAC dentro de Ogg (a lofty não suporta); mesma versão que a lofty usa
 
 [dev-dependencies]
 base64 = "0.22"
+ogg_pager = "0.8"
