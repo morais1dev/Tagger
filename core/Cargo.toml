@@ -1,0 +1,14 @@
+[package]
+name = "tagger-core"
+version = "3.0.0-dev"
+description = "Núcleo do Tagger v3: regra de negócio de tags, sem interface"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "tagger_core"
+
+[dependencies]
+lofty.workspace = true
+base64 = "0.22"
