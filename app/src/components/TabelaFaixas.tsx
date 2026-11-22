@@ -1,21 +1,28 @@
-import { type KeyboardEvent, type MouseEvent, useRef } from "react";
+import { type KeyboardEvent, type MouseEvent, useEffect, useRef } from "react";
 import { type Faixa, temPendencia } from "../api";
 import {
   COLUNAS, COLUNAS_DIREITA, COLUNAS_MONO, LARGURA_MINIMA, type ChaveColuna, celulaApagada, celulaPendente,
   temCapaEfetiva, textoDaCelula, tituloVazio, tooltipDaCelula,
 } from "../colunas";
 import { type Ordem } from "../ordenacao";
+import { TECLAS_NAVEGACAO, type TeclaNavegacao } from "../selecao";
 
 export interface PropsTabela {
   /** Faixas já filtradas e ordenadas, na ordem em que aparecem. */
   faixas: readonly Faixa[];
   selecionados: ReadonlySet<string>;
+  /** Linha atual do teclado. */
+  foco: string | null;
   /** Colunas visíveis, na ordem das COLUNAS. */
   visiveis: readonly ChaveColuna[];
   /** Largura escolhida pelo usuário, por coluna (sem entrada = a inicial). */
   larguras: Readonly<Partial<Record<ChaveColuna, number>>>;
   ordem: Ordem | null;
-  aoClicarLinha(id: string, mod: { ctrl: boolean; shift: boolean }): void;
+  /** Botão do mouse apertado sobre a linha (clique, Ctrl, Shift e começo de um arrasto). */
+  aoPressionarLinha(id: string, mod: { ctrl: boolean; shift: boolean }): void;
+  /** Mouse com o botão apertado passou por esta linha (arrastar para selecionar). */
+  aoArrastarSobre(id: string, ctrl: boolean): void;
+  aoNavegar(tecla: TeclaNavegacao, shift: boolean, pagina: number): void;
   aoSelecionarTudo(): void;
   aoOrdenar(chave: ChaveColuna): void;
   aoRedimensionar(chave: ChaveColuna, largura: number): void;
@@ -23,6 +30,8 @@ export interface PropsTabela {
 }
 
 const PASSO_TECLADO = 10;
+const ALTURA_LINHA = 34;
+const PAGINA_PADRAO = 10;          // linhas por PgUp/PgDn quando a altura da tabela é desconhecida
 
 function Indicador({ faixa, chave }: { faixa: Faixa; chave: "capa" | "estado" }) {
   if (chave === "capa") {
@@ -39,7 +48,25 @@ export function TabelaFaixas(p: PropsTabela) {
     return largura === null ? "minmax(160px, 1fr)" : `${largura}px`;       // Título estica (mínimo 160 px)
   }).join(" ");
   const arrasto = useRef<{ chave: ChaveColuna; x: number; largura: number } | null>(null);
+  const selecionando = useRef(false);                // botão apertado numa linha: arrastar seleciona
+  const grade = useRef<HTMLDivElement>(null);
+  const idFoco = p.foco === null ? -1 : p.faixas.findIndex((f) => f.id === p.foco);
 
+  // mantém a linha do teclado à vista
+  useEffect(() => {
+    if (idFoco >= 0) document.getElementById(`linha-${idFoco}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [idFoco]);
+
+  function pressionar(e: MouseEvent, id: string) {
+    if (e.button !== 0) return;
+    selecionando.current = true;
+    const soltar = () => {
+      selecionando.current = false;
+      document.removeEventListener("mouseup", soltar);
+    };
+    document.addEventListener("mouseup", soltar);
+    p.aoPressionarLinha(id, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
+  }
   function comecarArrasto(e: MouseEvent, chave: ChaveColuna) {
     e.preventDefault();
     e.stopPropagation();
@@ -69,6 +96,10 @@ export function TabelaFaixas(p: PropsTabela) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
       e.preventDefault();
       p.aoSelecionarTudo();
+    } else if (TECLAS_NAVEGACAO.includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      const altura = grade.current?.clientHeight ?? 0;
+      p.aoNavegar(e.key as TeclaNavegacao, e.shiftKey, altura > 0 ? Math.floor(altura / ALTURA_LINHA) - 1 : PAGINA_PADRAO);
     }
   }
 
@@ -80,6 +111,8 @@ export function TabelaFaixas(p: PropsTabela) {
       aria-multiselectable="true"
       aria-rowcount={p.faixas.length + 1}
       tabIndex={0}
+      ref={grade}
+      aria-activedescendant={idFoco >= 0 ? `linha-${idFoco}` : undefined}
       onKeyDown={aoTeclar}
     >
       <div
@@ -129,12 +162,14 @@ export function TabelaFaixas(p: PropsTabela) {
           return (
             <div
               key={faixa.id}
+              id={`linha-${i}`}
               role="row"
               aria-rowindex={i + 2}
               aria-selected={selecionada}
-              className={`linha${selecionada ? " selecionada" : ""}`}
+              className={`linha${selecionada ? " selecionada" : ""}${p.foco === faixa.id ? " foco" : ""}`}
               style={{ gridTemplateColumns: modelo }}
-              onClick={(e) => p.aoClicarLinha(faixa.id, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })}
+              onMouseDown={(e) => pressionar(e, faixa.id)}
+              onMouseEnter={(e) => selecionando.current && e.buttons === 1 && p.aoArrastarSobre(faixa.id, e.ctrlKey || e.metaKey)}
             >
               {colunas.map((c) => {
                 const pendente = celulaPendente(faixa, c.chave);

@@ -3,7 +3,7 @@ import { type Faixa } from "./api";
 import { COLUNAS, celulaApagada, celulaPendente, colunasPadrao, duracaoFormatada, temCapaEfetiva, textoDaCelula, tooltipDaCelula } from "./colunas";
 import { faixasDeExemplo } from "./mock/ponteSimulada";
 import { ordenar, proximaOrdem } from "./ordenacao";
-import { SELECAO_VAZIA, clicar, manterVisiveis, selecionarTudo } from "./selecao";
+import { SELECAO_VAZIA, arrastar, clicar, manterVisiveis, navegar, selecionarTudo } from "./selecao";
 
 const faixa = (extra: Partial<Faixa> & { id: string }): Faixa => ({
   caminho: `C:\\m\\${extra.id}.mp3`, tags: {}, pendentes: {}, duracao: 100, bitrate: 128, temCapa: false, ...extra,
@@ -52,6 +52,11 @@ describe("colunas (iguais às da v2)", () => {
     expect(temCapaEfetiva(faixa({ id: "e", temCapa: true, capaPendente: "remover" }))).toBe(false);
     expect(tooltipDaCelula(faixa({ id: "f", temCapa: false }), "capa")).toBe("Sem capa");
   });
+
+  it("o tooltip da capa usa a capa do arquivo, não a pendente (como na v2)", () => {
+    expect(tooltipDaCelula(faixa({ id: "g", temCapa: false, capaPendente: "definir" }), "capa")).toBe("Sem capa");
+    expect(tooltipDaCelula(faixa({ id: "h", temCapa: true, capaPendente: "remover" }), "capa")).toBe("Tem capa");
+  });
 });
 
 describe("ordenação", () => {
@@ -89,6 +94,17 @@ describe("ordenação", () => {
     const l = [faixa({ id: "x", duracao: 300 }), faixa({ id: "y", duracao: 60, temCapa: true })];
     expect(ids(ordenar(l, { chave: "duracao", direcao: "asc" }))).toEqual(["y", "x"]);
     expect(ids(ordenar(l, { chave: "capa", direcao: "desc" }))).toEqual(["y", "x"]);
+  });
+
+  it("Pasta ordena pelo caminho completo da pasta: X\\CD1 e Y\\CD1 não empatam", () => {
+    const l = [
+      faixa({ id: "y1", caminho: "C:\\Y\\CD1\\a.mp3" }),
+      faixa({ id: "x2", caminho: "C:\\X\\CD2\\a.mp3" }),
+      faixa({ id: "x1", caminho: "C:\\x\\CD1\\a.mp3" }),
+      faixa({ id: "y0", caminho: "C:\\Y\\CD1\\b.mp3" }),
+    ];
+    expect(ids(ordenar(l, { chave: "pasta", direcao: "asc" }))).toEqual(["x1", "x2", "y1", "y0"]);   // caixa ignorada, empate estável
+    expect(ids(ordenar(l, { chave: "pasta", direcao: "desc" }))).toEqual(["y1", "y0", "x2", "x1"]);
   });
 
   it("clique no cabeçalho: coluna nova cresce, a mesma alterna", () => {
@@ -141,6 +157,82 @@ describe("seleção", () => {
     const filtrada = manterVisiveis(todas, ["b", "c"]);
     expect(ids(filtrada)).toEqual(["b", "c"]);
     expect(manterVisiveis(filtrada, ["b", "c"])).toBe(filtrada);       // nada mudou: mesma referência
+  });
+});
+
+describe("seleção: arrastar e teclado", () => {
+  const v = ["a", "b", "c", "d", "e", "f", "g"];
+  const ids = (s: typeof SELECAO_VAZIA) => [...s.ids].sort();
+  const sel = (id: string) => clicar(SELECAO_VAZIA, id, v, { ctrl: false, shift: false });
+
+  it("arrastar seleciona da linha apertada até a linha sob o mouse, nos dois sentidos", () => {
+    const base = sel("c");
+    expect(ids(arrastar(base, "e", v, false))).toEqual(["c", "d", "e"]);
+    expect(ids(arrastar(base, "a", v, false))).toEqual(["a", "b", "c"]);
+    expect(ids(arrastar(base, "c", v, false))).toEqual(["c"]);
+    expect(arrastar(base, "e", v, false).ancora).toBe("c");
+  });
+
+  it("Ctrl+arrastar soma ao que já estava selecionado", () => {
+    let s = sel("a");
+    s = clicar(s, "d", v, { ctrl: true, shift: false });                // a, d (âncora d)
+    expect(ids(arrastar(s, "f", v, true))).toEqual(["a", "d", "e", "f"]);
+  });
+
+  it("setas movem a linha atual e selecionam só ela", () => {
+    let s = sel("c");
+    s = navegar(s, "ArrowDown", v, false, 3);
+    expect(ids(s)).toEqual(["d"]);
+    expect(s.foco).toBe("d");
+    s = navegar(s, "ArrowUp", v, false, 3);
+    s = navegar(s, "ArrowUp", v, false, 3);
+    expect(ids(s)).toEqual(["b"]);
+  });
+
+  it("para na primeira e na última linha", () => {
+    expect(ids(navegar(sel("a"), "ArrowUp", v, false, 3))).toEqual(["a"]);
+    expect(ids(navegar(sel("g"), "ArrowDown", v, false, 3))).toEqual(["g"]);
+  });
+
+  it("sem linha atual, a seta começa pela primeira", () => {
+    expect(ids(navegar(SELECAO_VAZIA, "ArrowDown", v, false, 3))).toEqual(["a"]);
+    expect(ids(navegar(SELECAO_VAZIA, "ArrowUp", v, false, 3))).toEqual(["a"]);
+  });
+
+  it("Shift+setas esticam a seleção a partir da âncora e podem encolher", () => {
+    let s = sel("c");
+    s = navegar(s, "ArrowDown", v, true, 3);
+    s = navegar(s, "ArrowDown", v, true, 3);
+    expect(ids(s)).toEqual(["c", "d", "e"]);
+    expect(s.ancora).toBe("c");
+    s = navegar(s, "ArrowUp", v, true, 3);
+    expect(ids(s)).toEqual(["c", "d"]);
+    for (let i = 0; i < 3; i++) s = navegar(s, "ArrowUp", v, true, 3);
+    expect(ids(s)).toEqual(["a", "b", "c"]);                         // passou da âncora: vai para o outro lado
+  });
+
+  it("Home e End; com Shift selecionam até a ponta", () => {
+    expect(ids(navegar(sel("d"), "Home", v, false, 3))).toEqual(["a"]);
+    expect(ids(navegar(sel("d"), "End", v, false, 3))).toEqual(["g"]);
+    expect(ids(navegar(sel("d"), "Home", v, true, 3))).toEqual(["a", "b", "c", "d"]);
+    expect(ids(navegar(sel("d"), "End", v, true, 3))).toEqual(["d", "e", "f", "g"]);
+  });
+
+  it("PgDn e PgUp andam uma página, limitados às pontas; Shift estica", () => {
+    expect(ids(navegar(sel("b"), "PageDown", v, false, 3))).toEqual(["e"]);
+    expect(ids(navegar(sel("e"), "PageDown", v, false, 3))).toEqual(["g"]);
+    expect(ids(navegar(sel("e"), "PageUp", v, false, 3))).toEqual(["b"]);
+    expect(ids(navegar(sel("b"), "PageUp", v, false, 3))).toEqual(["a"]);
+    expect(ids(navegar(sel("b"), "PageDown", v, true, 3))).toEqual(["b", "c", "d", "e"]);
+    expect(ids(navegar(sel("b"), "PageDown", v, false, 0))).toEqual(["c"]);        // página inválida vale 1
+  });
+
+  it("lista vazia: nada muda", () => {
+    expect(navegar(SELECAO_VAZIA, "ArrowDown", [], false, 3)).toBe(SELECAO_VAZIA);
+  });
+
+  it("a linha atual que saiu da lista é esquecida", () => {
+    expect(manterVisiveis(sel("c"), ["a", "b"]).foco).toBeNull();
   });
 });
 

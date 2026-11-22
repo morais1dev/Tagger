@@ -65,7 +65,7 @@ describe("destaque de célula pendente", () => {
     expect(estado).toHaveAttribute("title", "Alterado, não salvo");
     expect(estado.querySelector(".ponto-pendente")).not.toBeNull();
     const quarta = within(linhas()[3]).getAllByRole("gridcell").find((c) => c.dataset.coluna === "capa")!;
-    expect(quarta).toHaveAttribute("title", "Tem capa");                     // capa pendente conta como "tem"
+    expect(quarta).toHaveAttribute("title", "Sem capa");                     // o tooltip fala da capa do arquivo; o quadradinho mostra a pendente
     expect(quarta.querySelector(".capa-cheia")).not.toBeNull();
     const primeira = within(linhas()[0]).getAllByRole("gridcell").find((c) => c.dataset.coluna === "estado")!;
     expect(primeira.querySelector(".ponto-pendente")).toBeNull();
@@ -148,17 +148,92 @@ describe("seleção de linhas", () => {
   });
 });
 
+describe("seleção por arrasto e por teclado", () => {
+  const selecionadas = () => linhas().map((l, i) => (l.getAttribute("aria-selected") === "true" ? i : -1)).filter((i) => i >= 0);
+
+  it("arrastar o mouse de uma linha a outra seleciona o intervalo; soltar encerra o arrasto", async () => {
+    await abrir();
+    const [l0, l1, l2, l3] = linhas();
+    fireEvent.mouseDown(l1, { button: 0, buttons: 1 });
+    fireEvent.mouseEnter(l2, { buttons: 1 });
+    fireEvent.mouseEnter(l3, { buttons: 1 });
+    expect(selecionadas()).toEqual([1, 2, 3]);
+    fireEvent.mouseEnter(l0, { buttons: 1 });
+    expect(selecionadas()).toEqual([0, 1]);
+    fireEvent.mouseUp(document);
+    fireEvent.mouseEnter(l3, { buttons: 0 });
+    expect(selecionadas()).toEqual([0, 1]);                          // depois de soltar, passar o mouse não muda nada
+  });
+
+  it("Ctrl+arrastar soma ao que já estava selecionado; botão direito não seleciona", async () => {
+    await abrir();
+    const l = linhas();
+    fireEvent.mouseDown(l[0], { button: 0, buttons: 1 });
+    fireEvent.mouseUp(document);
+    fireEvent.mouseDown(l[3], { button: 0, buttons: 1, ctrlKey: true });
+    fireEvent.mouseEnter(l[5], { buttons: 1, ctrlKey: true });
+    fireEvent.mouseUp(document);
+    expect(selecionadas()).toEqual([0, 3, 4, 5]);
+    fireEvent.mouseDown(l[1], { button: 2, buttons: 2 });
+    expect(selecionadas()).toEqual([0, 3, 4, 5]);
+  });
+
+  it("clique com Ctrl alterna só uma vez (mousedown, sem clique duplicado)", async () => {
+    const usuario = await abrir();
+    await usuario.click(linhas()[0]);
+    await usuario.keyboard("{Control>}");
+    await usuario.click(linhas()[2]);
+    await usuario.keyboard("{/Control}");
+    expect(selecionadas()).toEqual([0, 2]);
+  });
+
+  it("setas, Home, End, PgDn e PgUp movem a seleção; Shift estica", async () => {
+    const usuario = await abrir();
+    await usuario.click(linhas()[1]);
+    await usuario.keyboard("{ArrowDown}");
+    expect(selecionadas()).toEqual([2]);
+    await usuario.keyboard("{Shift>}{ArrowDown}{ArrowDown}{/Shift}");
+    expect(selecionadas()).toEqual([2, 3, 4]);
+    await usuario.keyboard("{End}");
+    expect(selecionadas()).toEqual([6]);
+    await usuario.keyboard("{Home}");
+    expect(selecionadas()).toEqual([0]);
+    await usuario.keyboard("{PageDown}");                            // jsdom não tem altura: página de 10 linhas, limitada à última
+    expect(selecionadas()).toEqual([6]);
+    await usuario.keyboard("{PageUp}");
+    expect(selecionadas()).toEqual([0]);
+    await usuario.keyboard("{Shift>}{End}{/Shift}");
+    expect(selecionadas()).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it("a grade aponta a linha atual com aria-activedescendant", async () => {
+    const usuario = await abrir();
+    await usuario.click(linhas()[2]);
+    await usuario.keyboard("{ArrowDown}");
+    expect(screen.getByRole("grid")).toHaveAttribute("aria-activedescendant", linhas()[3].id);
+  });
+
+  it("depois de ordenar, as setas seguem a ordem que aparece na tela", async () => {
+    const usuario = await abrir();
+    await usuario.click(screen.getByRole("button", { name: "Duração" }));
+    await usuario.click(linhas()[0]);                                // sem-tags.flac (1:35, a menor)
+    await usuario.keyboard("{ArrowDown}");
+    expect(titulos()[selecionadas()[0]]).toBe("Abertura");           // a segunda menor
+  });
+});
+
 describe("colunas: mostrar/esconder e redimensionar", () => {
   async function abrirMenu(usuario: ReturnType<typeof userEvent.setup>) {
     await usuario.pointer({ keys: "[MouseRight]", target: screen.getAllByRole("columnheader")[1] });
     return screen.findByRole("menu", { name: "Colunas" });
   }
 
-  it("clique direito no cabeçalho abre o menu; Título fica fixo e estado não aparece", async () => {
+  it("clique direito no cabeçalho abre o menu, sem as colunas fixas (Título e estado)", async () => {
     const usuario = await abrir();
     const menu = await abrirMenu(usuario);
-    expect(within(menu).getByRole("menuitemcheckbox", { name: /Título/ })).toBeDisabled();
+    expect(within(menu).queryByRole("menuitemcheckbox", { name: /Título/ })).toBeNull();
     expect(within(menu).queryByRole("menuitemcheckbox", { name: /Estado/ })).toBeNull();
+    expect(within(menu).getAllByRole("menuitemcheckbox")).toHaveLength(17);       // 19 colunas menos as 2 fixas
     expect(within(menu).getByRole("menuitemcheckbox", { name: /Ano/ })).toHaveAttribute("aria-checked", "true");
     expect(within(menu).getByRole("menuitemcheckbox", { name: /Gravadora/ })).toHaveAttribute("aria-checked", "false");
   });

@@ -56,6 +56,12 @@ export function nomeDoArquivo(faixa: Faixa): string {
   return faixa.caminho.split(/[\\/]/).pop() ?? faixa.caminho;
 }
 
+/** Caminho completo da pasta-pai (como `str(faixa.caminho.parent)` na v2). */
+export function caminhoDaPasta(faixa: Faixa): string {
+  const i = Math.max(faixa.caminho.lastIndexOf("\\"), faixa.caminho.lastIndexOf("/"));
+  return i > 0 ? faixa.caminho.slice(0, i) : "";
+}
+
 export function nomeDaPasta(faixa: Faixa): string {
   const partes = faixa.caminho.split(/[\\/]/);
   return partes.length >= 2 ? partes[partes.length - 2] : "";

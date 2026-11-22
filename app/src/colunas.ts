@@ -102,7 +102,7 @@ export function temCapaEfetiva(faixa: Faixa): boolean {
 export function tooltipDaCelula(faixa: Faixa, chave: ChaveColuna): string | undefined {
   if (chave === "title" || chave === "arquivo" || chave === "pasta") return faixa.caminho;
   if (TEXTO_LONGO.has(chave)) return ehTag(chave) ? valorDoCampo(faixa, chave) || undefined : undefined;
-  if (chave === "capa") return temCapaEfetiva(faixa) ? "Tem capa" : "Sem capa";
+  if (chave === "capa") return faixa.temCapa ? "Tem capa" : "Sem capa";      // como na v2: a do arquivo, não a pendente
   if (chave === "estado" && temPendencia(faixa)) return "Alterado, não salvo";
   return undefined;
 }

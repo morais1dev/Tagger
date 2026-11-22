@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { type Faixa, type Ponte, nomeDoArquivo, valorDoCampo } from "../api";
 import { type ChaveColuna, COLUNAS, colunasPadrao } from "../colunas";
 import { type Ordem, ordenar, proximaOrdem } from "../ordenacao";
-import { type Selecao, SELECAO_VAZIA, clicar, manterVisiveis, selecionarTudo } from "../selecao";
+import { type Selecao, SELECAO_VAZIA, arrastar, clicar, manterVisiveis, navegar, selecionarTudo } from "../selecao";
 import { TEMAS, TEMA_PADRAO } from "../temas";
 import { BarraTopo } from "./BarraTopo";
 import { MenuColunas } from "./MenuColunas";
@@ -40,6 +40,7 @@ export function Janela({ ponte }: { ponte: Ponte }) {
   const [larguras, setLarguras] = useState<Partial<Record<ChaveColuna, number>>>({});
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const refFiltro = useRef<HTMLInputElement>(null);
+  const baseDoArrasto = useRef<Selecao>(SELECAO_VAZIA);      // seleção logo depois de apertar o botão do mouse
 
   useEffect(() => {
     document.documentElement.dataset.tema = tema;
@@ -99,10 +100,17 @@ export function Janela({ ponte }: { ponte: Ponte }) {
         <TabelaFaixas
           faixas={exibidas}
           selecionados={selecao.ids}
+          foco={selecao.foco}
           visiveis={visiveis}
           larguras={larguras}
           ordem={ordem}
-          aoClicarLinha={(id, mod) => setSelecao((s) => clicar(s, id, idsExibidos, mod))}
+          aoPressionarLinha={(id, mod) => {
+            const nova = clicar(selecao, id, idsExibidos, mod);
+            baseDoArrasto.current = nova;
+            setSelecao(nova);
+          }}
+          aoArrastarSobre={(id, ctrl) => setSelecao(arrastar(baseDoArrasto.current, id, idsExibidos, ctrl))}
+          aoNavegar={(tecla, shift, pagina) => setSelecao((s) => navegar(s, tecla, idsExibidos, shift, pagina))}
           aoSelecionarTudo={() => setSelecao((s) => selecionarTudo(idsExibidos, s))}
           aoOrdenar={(chave) => setOrdem((o) => proximaOrdem(o, chave))}
           aoRedimensionar={(chave, largura) => setLarguras((l) => ({ ...l, [chave]: largura }))}

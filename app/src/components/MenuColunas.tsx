@@ -10,7 +10,7 @@ interface Props {
   aoFechar(): void;
 }
 
-/** Menu do cabeçalho (clique direito): mostra/esconde colunas; Título e estado são fixas. */
+/** Menu do cabeçalho (clique direito): mostra/esconde colunas; as fixas (Título e estado) não aparecem. */
 export function MenuColunas({ x, y, visiveis, aoAlternar, aoRestaurar, aoFechar }: Props) {
   useEffect(() => {
     const fechar = (e: KeyboardEvent) => e.key === "Escape" && aoFechar();
@@ -22,13 +22,12 @@ export function MenuColunas({ x, y, visiveis, aoAlternar, aoRestaurar, aoFechar 
     <>
       <div className="menu-fundo" onClick={aoFechar} onContextMenu={(e) => { e.preventDefault(); aoFechar(); }} />
       <div role="menu" aria-label="Colunas" className="menu" style={{ left: x, top: y }}>
-        {COLUNAS.filter((c) => c.chave !== "estado").map((c) => (
+        {COLUNAS.filter((c) => !COLUNAS_FIXAS.has(c.chave)).map((c) => (
           <button
             key={c.chave}
             type="button"
             role="menuitemcheckbox"
             aria-checked={visiveis.includes(c.chave)}
-            disabled={COLUNAS_FIXAS.has(c.chave)}
             onClick={() => aoAlternar(c.chave)}
           >
             <span aria-hidden="true">{visiveis.includes(c.chave) ? "✓" : ""}</span> {c.titulo}

@@ -1,4 +1,4 @@
-import { type Faixa, nomeDaPasta, nomeDoArquivo, temPendencia, valorDoCampo } from "./api";
+import { type Faixa, caminhoDaPasta, nomeDoArquivo, temPendencia, valorDoCampo } from "./api";
 import { type ChaveColuna, ehTag } from "./colunas";
 
 export type Direcao = "asc" | "desc";
@@ -32,7 +32,7 @@ export function valorDeOrdem(faixa: Faixa, chave: ChaveColuna): string | number 
     case "arquivo":
       return nomeDoArquivo(faixa).toLocaleLowerCase();
     case "pasta":
-      return nomeDaPasta(faixa).toLocaleLowerCase();
+      return caminhoDaPasta(faixa).toLocaleLowerCase();      // pelo caminho completo: X\CD1 e Y\CD1 não empatam
     case "title":
       return (valorDoCampo(faixa, "title") || nomeDoArquivo(faixa)).toLocaleLowerCase();
   }
