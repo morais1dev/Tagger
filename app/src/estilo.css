@@ -6,15 +6,64 @@ body {
   font-family: "Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   font-size: 13px;
 }
-.janela { height: 100%; display: flex; flex-direction: column; }
+.janela { height: 100%; display: flex; flex-direction: column; min-width: 0; }
+
+/* barra do topo */
 .barra {
   display: flex; align-items: center; gap: 12px; padding: 8px 12px;
   background: var(--surface); border-bottom: 1px solid var(--line);
 }
-.barra label { color: var(--muted); }
-select {
+.nome-app { margin-right: 4px; }
+.barra label, .contador { color: var(--muted); }
+.filtro { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.filtro input { flex: 0 1 260px; min-width: 80px; }
+.seletor-tema { margin-left: auto; }
+button, select, input {
   background: var(--field); color: var(--text); border: 1px solid var(--line2);
-  border-radius: 6px; padding: 4px 8px; font: inherit;
+  border-radius: 6px; padding: 4px 10px; font: inherit;
 }
-select:hover { background: var(--hover); }
-select:focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
+button:hover:not(:disabled), select:hover { background: var(--hover); }
+button:disabled { color: var(--faint); }
+:is(button, select, input, [role="grid"], [role="separator"]):focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
+.vazio { margin: auto; color: var(--muted); }
+.so-leitor { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+/* tabela: grade CSS com as mesmas colunas da v2 */
+.tabela { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; outline-offset: -2px; }
+.tabela-cabecalho, .linha { display: grid; align-items: center; min-width: max-content; }
+.tabela-cabecalho {
+  position: sticky; top: 0; z-index: 1; background: var(--surface); border-bottom: 1px solid var(--line); height: 32px;
+}
+.tabela-cabecalho > [role="columnheader"] { position: relative; height: 100%; display: flex; align-items: center; min-width: 0; }
+.cabecalho-botao {
+  flex: 1; text-align: left; background: transparent; border: 0; border-radius: 0; padding: 0 8px;
+  height: 100%; color: var(--muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.direita .cabecalho-botao { text-align: right; }
+.cabecalho-botao:hover { color: var(--text); background: var(--hover) !important; }
+.alca { position: absolute; right: 0; top: 0; bottom: 0; width: 6px; cursor: col-resize; border: 0; padding: 0; background: transparent; }
+.alca:hover { background: var(--line2); }
+.linha { height: 34px; border-bottom: 1px solid transparent; cursor: default; }
+.linha:hover { background: var(--hover); }
+.linha.selecionada { background: color-mix(in srgb, var(--acento) 22%, transparent); }
+.celula { padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: 100%; display: flex; align-items: center; }
+.celula.mono { font-family: "Geist Mono", "Cascadia Mono", Consolas, monospace; }
+.celula.direita { justify-content: flex-end; }
+.celula.apagada { color: var(--muted); }
+.celula.sem-titulo { font-style: italic; color: var(--muted); }
+/* célula com alteração não salva: fundo na cor de destaque (~10 %) e texto em cor normal */
+.celula.pendente { background: color-mix(in srgb, var(--acento) 10%, transparent); color: var(--text); }
+.capa { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--line2); box-sizing: border-box; }
+.capa-cheia { background: color-mix(in srgb, var(--acento) 59%, transparent); }
+.capa-vazia { border-style: dashed; }
+.ponto-pendente { width: 7px; height: 7px; border-radius: 50%; background: var(--acento); }
+
+/* menu das colunas */
+.menu-fundo { position: fixed; inset: 0; z-index: 9; }
+.menu {
+  position: fixed; z-index: 10; min-width: 200px; display: flex; flex-direction: column; padding: 4px;
+  background: var(--surface2); border: 1px solid var(--line2); border-radius: 8px;
+}
+.menu button { text-align: left; border: 0; background: transparent; }
+.menu button span { display: inline-block; width: 1.2em; }
+.menu hr { border: 0; border-top: 1px solid var(--line); width: 100%; }
