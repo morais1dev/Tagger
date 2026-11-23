@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import {
-  ATRIBUICAO_DISCOGS, ATRIBUICAO_MUSICBRAINZ, AVISO_DISCOGS, DESCRICOES, DICA_SEM_DISCOGS, DISCOGS, DOMINIOS_DISCOGS,
+  ATRIBUICAO_DISCOGS, ATRIBUICAO_MUSICBRAINZ, DESCRICOES, DICA_SEM_DISCOGS, DISCOGS, DOMINIOS_DISCOGS,
   ErroBusca, FONTES, MUSICBRAINZ, NAO_ENCONTRADO, NOMES, ROTULOS, URL_SITE_DISCOGS, primeiroValor, urlSegura,
   type Atribuicao, type Candidato, type Capa, type Detalhe, type EstadosServicos, type FaixaBusca, type Fonte,
   type PonteBusca, type Resultado,
@@ -29,12 +29,12 @@ interface Lista {
 const mensagemDe = (e: unknown): string => (e instanceof ErroBusca ? e.message : "Erro inesperado (detalhes no tagger.log).");
 const foiInterrompido = (e: unknown): boolean => e instanceof Error && e.name === "AbortError";
 
-function AtribuicaoTexto({ atribuicao, url }: { atribuicao: string; url?: string }) {
+function AtribuicaoTexto({ atribuicao, url, textoLink }: { atribuicao: string; url?: string; textoLink?: string }) {
   const link = urlSegura(url, DOMINIOS_DISCOGS);
   return (
     <>
       {atribuicao}
-      {link && <>{" "}<a href={link} target="_blank" rel="noopener noreferrer">Ver o release no Discogs</a></>}
+      {link && <>{" "}<a href={link} target="_blank" rel="noopener noreferrer">{textoLink ?? "Ver o release no Discogs"}</a></>}
     </>
   );
 }
@@ -240,10 +240,9 @@ export function DialogoBuscaOnline({ faixas, ponte, estados, fonteInicial = MUSI
   } else if (selecionado && falhas[selecionado]) textoPrevia = "Prévia indisponível.";
   else if (selecionado && carregando) textoPrevia = "Carregando a prévia...";
 
-  const mostrarAtribuicaoDiscogs = detalhe ? detalhe.atribuicao.texto === ATRIBUICAO_DISCOGS : fonte === DISCOGS;
   const atribuicao: Atribuicao = detalhe
     ? detalhe.atribuicao
-    : { texto: fonte === DISCOGS ? ATRIBUICAO_DISCOGS : ATRIBUICAO_MUSICBRAINZ, url: fonte === DISCOGS ? URL_SITE_DISCOGS : undefined };
+    : { texto: fonte === DISCOGS ? ATRIBUICAO_DISCOGS : ATRIBUICAO_MUSICBRAINZ, url: fonte === DISCOGS ? URL_SITE_DISCOGS : undefined, textoLink: "discogs.com" };
   const fonteComCapa = (lista?.fonte ?? fonte) === MUSICBRAINZ;
   const caixa = useRef<HTMLDivElement>(null);
   const cancelarAtual = useRef(cancelar);
@@ -310,8 +309,7 @@ export function DialogoBuscaOnline({ faixas, ponte, estados, fonteInicial = MUSI
 
         <div className="bo-atribuicao">
           <span data-testid="atribuicao">
-            <AtribuicaoTexto atribuicao={atribuicao.texto} url={atribuicao.url} />
-            {mostrarAtribuicaoDiscogs && <span className="bo-aviso"> {AVISO_DISCOGS}</span>}
+            <AtribuicaoTexto atribuicao={atribuicao.texto} url={atribuicao.url} textoLink={atribuicao.textoLink} />
           </span>
           {aoAbrirSobre && <button type="button" className="bo-link" title="Sobre o Tagger e os serviços online (F1)" onClick={aoAbrirSobre}>Sobre</button>}
         </div>

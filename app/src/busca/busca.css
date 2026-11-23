@@ -30,7 +30,6 @@
 .bo-atribuicao > span { flex: 1; }
 .bo-atribuicao a, .bo-link { color: var(--acento); }
 .bo-link { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; text-decoration: underline; }
-.bo-aviso { color: var(--faint); }
 .bo-estado { margin: 0; color: var(--muted); font-size: 0.92em; min-height: 1.3em; }
 .bo-rodape { display: flex; align-items: center; gap: 8px; }
 .bo-espaco { flex: 1; }

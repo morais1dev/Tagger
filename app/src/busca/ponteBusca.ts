@@ -18,12 +18,18 @@ export interface OpcoesPonteBusca {
   erroBuscar?: Partial<Record<Fonte, string>>;
   erroDetalhar?: string;
   erroCapa?: string;
+  /** Cada resposta espera `liberar()` (testes sem depender de tempo real). */
+  manual?: boolean;
   /** Nunca responde: só a interrupção (AbortSignal) encerra. Para testar "cancelar sem esperar a rede". */
   pendurar?: boolean;
 }
 
 export interface PonteBuscaSimulada extends PonteBusca {
   /** Chamadas feitas, para os testes. */
+  /** Respostas esperando `liberar()` (modo manual). */
+  readonly pendentes: number;
+  /** Solta todas as respostas que estão esperando (modo manual). */
+  liberar(): void;
   readonly chamadas: Array<{ operacao: "buscar" | "detalhar" | "capa"; fonte?: Fonte; candidato?: string }>;
 }
 
@@ -33,13 +39,16 @@ const normalizar = (t: string): string => t.toLowerCase().replace(/[\W_]+/gu, " 
 
 export function criarPonteSimulada(o: OpcoesPonteBusca = {}): PonteBuscaSimulada {
   const chamadas: PonteBuscaSimulada["chamadas"] = [];
+  const esperando: Array<() => void> = [];
   const base: Record<Fonte, ReleaseSimulado[]> = { musicbrainz: o.musicbrainz ?? [], discogs: o.discogs ?? [] };
 
   /** Espera o atraso configurado; interrompe se o sinal disparar. */
   function esperar(sinal: AbortSignal): Promise<void> {
     return new Promise((resolver, rejeitar) => {
       if (sinal.aborted) return rejeitar(abortou());
-      const timer = o.pendurar ? undefined : setTimeout(resolver, o.atrasoMs ?? 0);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      if (o.manual) esperando.push(resolver);
+      else if (!o.pendurar) timer = setTimeout(resolver, o.atrasoMs ?? 0);
       sinal.addEventListener("abort", () => { clearTimeout(timer); rejeitar(abortou()); }, { once: true });
     });
   }
@@ -52,6 +61,8 @@ export function criarPonteSimulada(o: OpcoesPonteBusca = {}): PonteBuscaSimulada
 
   return {
     chamadas,
+    get pendentes() { return esperando.length; },
+    liberar() { esperando.splice(0).forEach((r) => r()); },
     async buscar(fonte, termos, sinal) {
       chamadas.push({ operacao: "buscar", fonte });
       await esperar(sinal);

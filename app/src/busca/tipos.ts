@@ -18,10 +18,6 @@ export const DESCRICOES: Record<Fonte, string> = {
 export const ATRIBUICAO_MUSICBRAINZ = "Dados do MusicBrainz · capas do Cover Art Archive.";
 export const ATRIBUICAO_DISCOGS = "Data provided by Discogs.";
 export const URL_SITE_DISCOGS = "https://www.discogs.com";
-/** Aviso que o Discogs exige (o mesmo do Sobre). */
-export const AVISO_DISCOGS =
-  "This application uses Discogs' API but is not affiliated with, sponsored or endorsed by Discogs. " +
-  "'Discogs' is a trademark of Zink Media, LLC.";
 export const DICA_SEM_DISCOGS =
   "Busca no Discogs indisponível: faltam as credenciais. Cole o seu token pessoal em Configurações → Serviços online.";
 /** Mensagem do erro "nada encontrado": com a alternativa ligada, é ela que dispara a busca no Discogs. */
@@ -74,6 +70,8 @@ export interface Atribuicao {
   texto: string;
   /** Link do release (Discogs); só é mostrado como link se for https de um domínio do serviço. */
   url?: string;
+  /** Texto do link; padrão "Ver o release no Discogs" (antes de escolher um release é "discogs.com", como na v2). */
+  textoLink?: string;
 }
 
 export interface Mudancas {

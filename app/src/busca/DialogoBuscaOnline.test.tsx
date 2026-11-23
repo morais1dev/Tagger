@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ReleaseSimulado } from "./analiseSimulada";
 import { DialogoBuscaOnline, type PropsBusca } from "./DialogoBuscaOnline";
 import { criarPonteSimulada, type OpcoesPonteBusca } from "./ponteBusca";
-import { AVISO_DISCOGS, DICA_SEM_DISCOGS, type Capa, type FaixaBusca } from "./tipos";
+import { DICA_SEM_DISCOGS, type Capa, type FaixaBusca } from "./tipos";
 
 const mb: ReleaseSimulado = {
   id: "mb1", descricao: "Aurora Lane — Daybreak  (2020, BR, 3 faixas, Selo)", titulo: "Daybreak", artista: "Aurora Lane",
@@ -51,6 +51,11 @@ const botao = (n: string | RegExp) => screen.getByRole("button", { name: n });
 const previa = () => within(screen.getByRole("table", { name: "Prévia" })).getAllByRole("row").slice(1).map((l) => within(l).getAllByRole("cell").map((c) => c.textContent));
 const espaco = (s: string) => s.replace(/\s+/g, " ");
 const opcao = (descricao: string) => screen.getByRole("option", { name: espaco(descricao) });
+/** Solta as respostas da ponte manual (espera existir alguma: nada depende de tempo real). */
+async function soltar(ponte: { pendentes: number; liberar(): void }) {
+  await waitFor(() => expect(ponte.pendentes).toBeGreaterThan(0));
+  ponte.liberar();
+}
 const estado = () => screen.getByRole("status");
 
 async function buscarPrimeiro(u: ReturnType<typeof userEvent.setup>) {
@@ -80,13 +85,16 @@ describe("abertura (G-01)", () => {
 
 describe("busca no MusicBrainz e prévia (G-01, G-02, G-07)", () => {
   it("lista o resultado, baixa os dados e mostra a prévia antes/depois", async () => {
-    const { usuario } = abrir({ atrasoMs: 20 });
+    const { usuario, ponte } = abrir({ manual: true });
     await usuario.click(botao("Buscar"));
     expect(estado()).toHaveTextContent("Buscando no MusicBrainz...");
     expect(botao("Buscar")).toBeDisabled();
+    await soltar(ponte);
     expect(await screen.findByRole("option", { name: espaco(mb.descricao) })).toHaveAttribute("aria-selected", "true");
     await waitFor(() => expect(estado()).toHaveTextContent("Baixando dados do álbum..."));
     expect(screen.getByTestId("texto-previa")).toHaveTextContent("Carregando a prévia...");
+    expect(botao("Aplicar ao rascunho")).toBeDisabled();
+    await soltar(ponte);
     await waitFor(() => expect(botao("Aplicar ao rascunho")).toBeEnabled());
     expect(estado()).toHaveTextContent("Confira a prévia e clique em Aplicar ao rascunho. Nada é gravado até você salvar.");
     expect(screen.getAllByRole("columnheader").map((c) => c.textContent)).toEqual(["Arquivo", "Campo", "Antes", "Depois"]);
@@ -212,13 +220,19 @@ describe("aplicar ao rascunho e capa (G-06, G-07)", () => {
 
 describe("só aplica o resultado do estado atual (G-08)", () => {
   it("escolher outro release desliga o Aplicar até a prévia dele chegar e entrega os dados dele", async () => {
-    const { usuario, aoAplicar } = abrir({ musicbrainz: [mb, mb2], atrasoMs: 15, capas: {} });
+    const { usuario, aoAplicar, ponte } = abrir({ musicbrainz: [mb, mb2], manual: true, capas: {} });
     await usuario.click(botao("Buscar"));
+    await soltar(ponte);                                       // a busca
+    await screen.findByRole("option", { name: espaco(mb2.descricao) });
+    await soltar(ponte);                                       // a prévia do 1º
     await waitFor(() => expect(botao("Aplicar ao rascunho")).toBeEnabled());
     await usuario.click(opcao(mb2.descricao));
+    await waitFor(() => expect(estado()).toHaveTextContent("Baixando dados do álbum..."));
     expect(botao("Aplicar ao rascunho")).toBeDisabled();       // a prévia do 2º ainda não chegou
+    await soltar(ponte);
     await waitFor(() => expect(botao("Aplicar ao rascunho")).toBeEnabled());
     await usuario.click(botao("Aplicar ao rascunho"));
+    await soltar(ponte);                                       // a capa (sem capa neste release)
     await waitFor(() => expect(aoAplicar).toHaveBeenCalled());
     expect(aoAplicar.mock.calls[0][0].alteracoes[0].mudancas.album).toBe("Daybreak Deluxe");
   });
@@ -256,11 +270,13 @@ describe("cancelar sem esperar a rede (G-08)", () => {
 
   it("Esc também cancela durante a consulta, e a resposta tardia é ignorada sem erro", async () => {
     const erros = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { usuario, aoCancelar } = abrir({ atrasoMs: 30 });
+    const { usuario, aoCancelar, ponte } = abrir({ manual: true });
     await usuario.click(botao("Buscar"));
+    await waitFor(() => expect(ponte.pendentes).toBeGreaterThan(0));
     await usuario.keyboard("{Escape}");
     expect(aoCancelar).toHaveBeenCalledTimes(1);
-    await new Promise((r) => setTimeout(r, 80));
+    ponte.liberar();                                           // a resposta tardia chega com o diálogo já fechado
+    await new Promise((r) => setTimeout(r, 0));
     expect(erros).not.toHaveBeenCalled();
     erros.mockRestore();
   });
@@ -282,14 +298,15 @@ describe("Discogs (G-03, G-09, G-12)", () => {
     expect(screen.getByRole("radio", { name: "Discogs" }).closest("label")).toHaveAttribute("title", "Token recusado.");
   });
 
-  it("atribuição do Discogs antes de escolher: texto, link do site e o aviso", async () => {
+  it("atribuição do Discogs antes de escolher: texto e link 'discogs.com' para o site, sem o aviso (que fica no Sobre)", async () => {
     const { usuario } = abrir();
     expect(screen.getByTestId("atribuicao")).toHaveTextContent("Dados do MusicBrainz · capas do Cover Art Archive.");
     await usuario.click(screen.getByRole("radio", { name: "Discogs" }));
     const atrib = screen.getByTestId("atribuicao");
     expect(atrib).toHaveTextContent("Data provided by Discogs.");
-    expect(atrib).toHaveTextContent(AVISO_DISCOGS);
-    expect(within(atrib).getByRole("link")).toHaveAttribute("href", "https://www.discogs.com/");
+    expect(atrib).not.toHaveTextContent("not affiliated");
+    const link = within(atrib).getByRole("link", { name: "discogs.com" });
+    expect(link).toHaveAttribute("href", "https://www.discogs.com/");
   });
 
   it("vinil: A1/B1/C1 viram faixa e disco, com a gravadora e o link do release", async () => {
