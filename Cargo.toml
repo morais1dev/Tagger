@@ -1,0 +1,17 @@
+# Workspace da v3. A v2 (Python) continua em tagger/ e tests/ até a v3.0.
+[workspace]
+resolver = "3"
+members = ["core"]
+# third_party/lofty entra só como dependência (via patch); spike/ tem crates próprias, fora do workspace
+exclude = ["third_party/lofty", "spike"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+lofty = "=0.25.5"
+
+# lofty vendorizada com os patches do Tagger (third_party/lofty/LEIAME-TAGGER.md)
+[patch.crates-io]
+lofty = { path = "third_party/lofty" }
