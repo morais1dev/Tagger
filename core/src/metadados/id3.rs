@@ -53,8 +53,19 @@ const FRAMES_DO_TAGGER: [&str; 17] = [
     "TYER", "TDAT", "TIME",
 ];
 
-/// Frames que a lofty lê como binários mas não são "desconhecidos" (o mutagen os entende).
-const BINARIOS_CONHECIDOS: [&str; 3] = ["GEOB", "SYLT", "ATXT"];
+/// Frames que o mutagen (v2) entende (`mutagen.id3.Frames`, mutagen 1.47.0). Um frame que a lofty lê como
+/// binário só é "desconhecido" se não estiver aqui, como os `unknown_frames` da v2; senão é "extra".
+const FRAMES_CONHECIDOS: [&str; 105] = [
+    "AENC", "APIC", "ASPI", "CHAP", "COMM", "COMR", "CTOC", "ENCR", "EQU2", "ETCO", "GEOB", "GRID",
+    "GRP1", "IPLS", "LINK", "MCDI", "MLLT", "MVIN", "MVNM", "OWNE", "PCNT", "PCST", "POPM", "POSS",
+    "PRIV", "RBUF", "RVA2", "RVAD", "RVRB", "SEEK", "SIGN", "SYLT", "SYTC", "TALB", "TBPM", "TCAT",
+    "TCMP", "TCOM", "TCON", "TCOP", "TDAT", "TDEN", "TDES", "TDLY", "TDOR", "TDRC", "TDRL", "TDTG",
+    "TENC", "TEXT", "TFLT", "TGID", "TIME", "TIPL", "TIT1", "TIT2", "TIT3", "TKEY", "TKWD", "TLAN",
+    "TLEN", "TMCL", "TMED", "TMOO", "TOAL", "TOFN", "TOLY", "TOPE", "TORY", "TOWN", "TPE1", "TPE2",
+    "TPE3", "TPE4", "TPOS", "TPRO", "TPUB", "TRCK", "TRDA", "TRSN", "TRSO", "TSIZ", "TSO2", "TSOA",
+    "TSOC", "TSOP", "TSOT", "TSRC", "TSSE", "TSST", "TXXX", "TYER", "UFID", "USER", "USLT", "WCOM",
+    "WCOP", "WFED", "WOAF", "WOAR", "WOAS", "WORS", "WPAY", "WPUB", "WXXX",
+];
 
 fn texto(tag: &Id3v2Tag, id: &str) -> Option<String> {
     let frame_id = frame_id(id);
@@ -279,7 +290,7 @@ pub(super) fn termina_em_id3v1(caminho: &Path) -> bool {
 
 // ---------------------------------------------------------------- limpeza
 fn desconhecido(f: &Frame<'_>) -> bool {
-    matches!(f, Frame::Binary(_)) && !BINARIOS_CONHECIDOS.contains(&f.id_str())
+    matches!(f, Frame::Binary(_)) && !FRAMES_CONHECIDOS.contains(&f.id_str())
 }
 
 fn e_extra(f: &Frame<'_>) -> bool {

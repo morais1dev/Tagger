@@ -162,6 +162,31 @@ fn id3v23_com_cabecalho_estendido_e_crc_fica_valido() {
     assert!(audio_do_mp3(&a) == audio);
 }
 
+// ---------------------------------------------------------------- frames desconhecidos
+#[test]
+fn frames_que_o_mutagen_conhece_nao_sao_desconhecidos() {
+    // revisão da T3.2a: MCDI (Windows Media Player), POSS, LINK, USER, GRID, COMR... são frames que a
+    // lofty lê como binários mas a v2 (mutagen) conhece: são "extras", nunca "desconhecidos".
+    use lofty::id3::v2::{BinaryFrame, Frame, FrameId, Id3v2Tag};
+    let a = amostra("mp3");
+    let mut tag = Id3v2Tag::new();
+    for id in ["MCDI", "POSS", "LINK", "USER", "GRID", "COMR", "XYZW"] {
+        tag.insert(Frame::Binary(BinaryFrame::new(FrameId::new(id).unwrap(), vec![1, 2, 3, 4])));
+    }
+    gravar_id3(&a, tag);
+    let antes = ids(&id3(&a).unwrap());
+    assert!(antes.contains(&"MCDI".to_string()) && antes.contains(&"XYZW".to_string()), "{antes:?}");
+
+    let analise = analisar_extras(&a);
+    assert_eq!(analise.desconhecidos, 1, "só o XYZW");
+    assert!(analise.extras.contains_key("MCDI") && !analise.extras.contains_key("XYZW"), "{:?}", analise.extras);
+
+    assert!(limpar_extras(&a, false, true, false, PADRAO).unwrap());
+    let depois = ids(&id3(&a).unwrap());
+    let esperado: Vec<String> = antes.into_iter().filter(|i| i != "XYZW").collect();
+    assert_eq!(depois, esperado, "limpar desconhecidos não apaga frames conhecidos");
+}
+
 // ---------------------------------------------------------------- ID3v1 (como o mutagen v1=1)
 #[test]
 fn id3v1_existente_e_atualizado_a_partir_da_v2() {
