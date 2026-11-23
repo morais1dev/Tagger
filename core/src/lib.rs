@@ -5,3 +5,4 @@
 
 pub mod amostras;
 pub mod metadados;
+pub mod validacao;
