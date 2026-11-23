@@ -9,6 +9,8 @@ interface Props {
   aoMudarFiltro(texto: string): void;
   mostrando: number;
   total: number;
+  painelVisivel: boolean;
+  aoAlternarPainel(): void;
 }
 
 /** Barra do topo: abrir pasta, filtro com contador e seletor de tema. */
@@ -19,6 +21,12 @@ export const BarraTopo = forwardRef<HTMLInputElement, Props>(function BarraTopo(
     <header className="barra" role="toolbar" aria-label="Barra principal">
       <strong className="nome-app">Tagger</strong>
       <button type="button" title="Abrir pasta (Ctrl+O)" onClick={p.aoAbrirPasta}>Abrir pasta</button>
+      <button
+        type="button"
+        aria-pressed={p.painelVisivel}
+        title={`${p.painelVisivel ? "Esconder" : "Mostrar"} o editor (Ctrl+E)`}
+        onClick={p.aoAlternarPainel}
+      >Editor</button>
       <div className="filtro">
         <input
           ref={refFiltro}
