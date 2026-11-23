@@ -1,0 +1,50 @@
+/* Diálogos de operações em lote: só usam os tokens de cor de temas.css. */
+.op-fundo {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.45); z-index: 10;
+}
+.op-janela {
+  display: flex; flex-direction: column; gap: 10px; box-sizing: border-box;
+  width: min(560px, 100vw - 32px); max-height: calc(100vh - 32px); padding: 20px 20px 16px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--line2); border-radius: 12px;
+}
+.op-larga { width: min(760px, 100vw - 32px); min-height: 420px; }
+.op-titulo { margin: 0; font-size: 1.2em; }
+.op-ajuda { margin: 0; color: var(--muted); font-size: 0.92em; white-space: pre-line; }
+.op-erro { margin: 0; color: var(--erro); }
+.op-conteudo { display: contents; }
+.op-seta { padding: 5px 9px; }
+.op-lista { right: auto; left: auto; max-width: 520px; }
+.op-linha-padrao, .op-linha-destino { display: flex; gap: 8px; align-items: center; }
+.op-linha-padrao input, .op-linha-destino input { flex: 1; }
+.op-mono { font-family: "Geist Mono", "Cascadia Mono", Consolas, monospace; }
+.op-opcoes { display: flex; flex-direction: column; gap: 6px; }
+.op-opcao { display: flex; align-items: center; gap: 6px; }
+.op-menu-pai { position: relative; }
+.op-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 2; margin: 0; padding: 4px; list-style: none;
+  background: var(--surface2); border: 1px solid var(--line2); border-radius: 8px; max-height: 260px; overflow-y: auto;
+}
+.op-menu button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 4px 10px; white-space: pre; }
+.op-separador { border-top: 1px solid var(--line); margin: 4px 0; }
+.op-previa { flex: 1; min-height: 120px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
+.op-previa table { width: 100%; border-collapse: collapse; }
+.op-previa th { position: sticky; top: 0; text-align: left; color: var(--muted); background: var(--surface2); padding: 4px 8px; }
+.op-previa td { padding: 3px 8px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-fraco { color: var(--muted); }
+.op-erro-celula, td.op-erro { color: var(--erro); }
+.op-detalhes { margin: 0; padding: 0 0 0 26px; list-style: none; color: var(--muted); font-size: 0.92em; white-space: pre; }
+.op-rodape { display: flex; align-items: center; gap: 8px; }
+.op-resumo { flex: 1; color: var(--muted); font-size: 0.92em; }
+
+.op-janela input[type="text"] {
+  background: var(--field); color: var(--text); border: 1px solid var(--line2); border-radius: 6px; padding: 4px 8px; font: inherit;
+}
+.op-janela :focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
+.op-botao {
+  background: var(--surface2); color: var(--text); border: 1px solid var(--line2); border-radius: 6px;
+  padding: 5px 12px; font: inherit; cursor: pointer;
+}
+.op-botao:hover:not(:disabled), .op-menu button:hover { background: var(--hover); }
+.op-botao:disabled { opacity: 0.5; cursor: default; }
+.op-primario { background: var(--acento); border-color: var(--acento); color: var(--bg); }
