@@ -39,7 +39,7 @@ export function ResumoOrganizar({ feitos, falhas, pasta, ponte, aoFechar }: Prop
       <div className="op-rodape">
         <span className="op-resumo" />
         <button type="button" className="op-botao" onClick={() => ponte.abrirPasta(pasta)}>Abrir pasta</button>
-        <button type="button" className="op-botao op-primario" autoFocus onClick={aoFechar}>Fechar</button>
+        <button type="button" className="op-botao op-primario" data-foco onClick={aoFechar}>Fechar</button>
       </div>
     </Moldura>
   );

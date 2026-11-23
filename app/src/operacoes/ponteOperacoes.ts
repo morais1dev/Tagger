@@ -2,7 +2,7 @@
 // padroesSimulados.ts e o núcleo Rust (tagger-core) entra no lugar com a mesma interface.
 
 import type { AnaliseExtras, PonteOperacoes } from "./tipos";
-import { planejarOrganizacao, planejarRenomeacao, previaTagsDoNome, type OpcoesSimuladas } from "./padroesSimulados";
+import { camposDoPadrao, planejarOrganizacao, planejarRenomeacao, previaTagsDoNome, type OpcoesSimuladas } from "./padroesSimulados";
 
 export interface OpcoesPonteSimulada extends OpcoesSimuladas {
   /** O que o seletor de pasta devolve (null = o usuário cancelou). */
@@ -39,6 +39,9 @@ export function criarPonteSimulada(opcoes: OpcoesPonteSimulada = {}): PonteOpera
     },
     previaOrganizar: async (itens, padrao, pasta, levarCapa) => {
       try {
+        // ordem da v2: campo desconhecido, nenhum campo, destino vazio, e só então planejar
+        if (!camposDoPadrao(padrao).length) throw new Error("Use pelo menos um campo, ex.: {artist}/{album}/{title}");
+        if (!pasta.trim()) throw new Error("Escolha a pasta de destino.");
         return planejarOrganizacao(itens, padrao, pasta, levarCapa, opcoes);
       } catch (e) {
         return comoErro(e);

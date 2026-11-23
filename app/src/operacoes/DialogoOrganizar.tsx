@@ -37,9 +37,7 @@ export function DialogoOrganizar({ faixas, padrao, recentes, pastaDestino, temPe
   const [removerVazias, setRemoverVazias] = useState(false);
 
   async function calcular(texto: string): Promise<Calculo<PlanoOrganizar> | { erro: string }> {
-    const pasta = destino.trim();
-    if (!pasta) return { erro: "Escolha a pasta de destino." };
-    const plano = await ponte.previaOrganizar(faixas.map(entradaDe), texto, pasta, levarCapa);
+    const plano = await ponte.previaOrganizar(faixas.map(entradaDe), texto, destino.trim(), levarCapa);
     if (houveErro(plano)) return plano;
     const linhas = [];
     let mudam = 0, noLugar = 0, erros = 0;
@@ -101,7 +99,8 @@ export function DialogoOrganizar({ faixas, padrao, recentes, pastaDestino, temPe
           </label>
         </>
       }
-      aoConfirmar={(texto, plano) => aoConfirmar({ padrao: texto, plano, pastaDestino: destino.trim(), removerVazias })}
+      // o destino entregue é o do plano mostrado, não o que foi digitado depois
+      aoConfirmar={(texto, plano) => aoConfirmar({ padrao: texto, plano, pastaDestino: plano.pasta, removerVazias })}
       aoCancelar={aoCancelar}
     />
   );

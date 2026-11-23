@@ -114,12 +114,40 @@ describe("DialogoRenomear (F-01 a F-03)", () => {
     expect(campo.value).toBe("{gravadora}{title}");
   });
 
-  it("padrões recentes (até 8, o atual no topo) e exemplos na lista do campo", async () => {
-    abrir({ recentes: Array.from({ length: 10 }, (_, i) => `{title} ${i}`) });
+  it("lista de padrões recentes (▾): inteira mesmo com o campo preenchido, até 8, o atual no topo", async () => {
+    const { usuario } = abrir({ recentes: Array.from({ length: 10 }, (_, i) => `{title} ${i}`) });
     await waitFor(() => expect(linhasDaPrevia()).toHaveLength(3));
-    const opcoes = [...document.querySelectorAll("datalist option")].map((o) => o.getAttribute("value"));
+    const campo = screen.getByLabelText(ROTULO_PADRAO) as HTMLInputElement;
+    expect(campo.value).toBe("{tracknumber:02} - {title}");
+    await usuario.click(botao("Padrões recentes"));
+    const opcoes = screen.getAllByRole("option");
     expect(opcoes).toHaveLength(8);
-    expect(opcoes[0]).toBe("{tracknumber:02} - {title}");
+    expect(opcoes[0]).toHaveTextContent("{tracknumber:02} - {title}");
+    await usuario.click(screen.getByRole("option", { name: "{title} 3" }));
+    expect(campo.value).toBe("{title} 3");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await waitFor(() => expect(within(linhasDaPrevia()[0]).getAllByRole("cell")[1]).toHaveTextContent("Afterglow 3.mp3"));
+  });
+
+  it("escolher um recente refaz a prévia com esse padrão", async () => {
+    const { usuario } = abrir({ recentes: ["{artist} - {title}"] });
+    await waitFor(() => expect(linhasDaPrevia()).toHaveLength(3));
+    await usuario.click(botao("Padrões recentes"));
+    await usuario.click(screen.getByRole("option", { name: "{artist} - {title}" }));
+    await waitFor(() => expect(within(linhasDaPrevia()[0]).getAllByRole("cell")[1]).toHaveTextContent("Aurora Lane - Afterglow.mp3"));
+  });
+
+  it("OK fica desligado enquanto o texto difere do que foi calculado e entrega o padrão do cálculo", async () => {
+    const { usuario, aoConfirmar } = abrir();
+    await waitFor(() => expect(botao("Renomear 3 arquivos")).toBeEnabled());
+    const campo = screen.getByLabelText(ROTULO_PADRAO);
+    await usuario.clear(campo);
+    await usuario.type(campo, "{{title}");
+    expect(botao(/^Renomear/)).toBeDisabled();             // ainda com a prévia velha na tela
+    await waitFor(() => expect(botao("Renomear 3 arquivos")).toBeEnabled());
+    await usuario.click(botao("Renomear 3 arquivos"));
+    expect(aoConfirmar.mock.calls[0][0]).toBe("{title}");
+    expect(aoConfirmar.mock.calls[0][1][0].destino).toBe("D:\\m\\Afterglow.mp3");
   });
 
   it("prévia limitada a 500 linhas, mas o resultado vale para todas", async () => {
@@ -373,5 +401,119 @@ describe("DialogoLimpeza (F-14 a F-16)", () => {
     expect(botao("Limpar")).toBeEnabled();
     await usuario.click(screen.getByLabelText(/Remover a tag ID3v1/));
     expect(botao("Limpar")).toBeDisabled();
+  });
+});
+
+describe("foco inicial e Esc (os 4 diálogos)", () => {
+  it("Renomear abre com o foco no campo do padrão; Esc cancela sem clicar", async () => {
+    const aoCancelar = vi.fn();
+    const usuario = userEvent.setup();
+    render(<DialogoRenomear faixas={faixas} padrao="{title}" recentes={[]} ponte={criarPonteSimulada()} aoConfirmar={vi.fn()} aoCancelar={aoCancelar} />);
+    expect(screen.getByLabelText(ROTULO_PADRAO)).toHaveFocus();
+    await usuario.keyboard("{Escape}");
+    expect(aoCancelar).toHaveBeenCalledTimes(1);
+  });
+
+  it("Tags pelo nome e Organizar também abrem com o foco no padrão", async () => {
+    const aoCancelar = vi.fn();
+    const usuario = userEvent.setup();
+    const { unmount } = render(<DialogoTagsDoNome faixas={faixas} padrao="%title%" recentes={[]} ponte={criarPonteSimulada()} aoConfirmar={vi.fn()} aoCancelar={aoCancelar} />);
+    expect(screen.getByLabelText(ROTULO_PADRAO)).toHaveFocus();
+    await usuario.keyboard("{Escape}");
+    expect(aoCancelar).toHaveBeenCalledTimes(1);
+    unmount();
+    render(<DialogoOrganizar faixas={faixas} padrao="{title}" recentes={[]} pastaDestino={"D:\d"} ponte={criarPonteSimulada()} aoConfirmar={vi.fn()} aoCancelar={aoCancelar} />);
+    expect(screen.getByLabelText(ROTULO_PADRAO)).toHaveFocus();
+    await usuario.keyboard("{Escape}");
+    expect(aoCancelar).toHaveBeenCalledTimes(2);
+  });
+
+  it("Limpeza abre com o foco no primeiro controle; Esc cancela", async () => {
+    const aoCancelar = vi.fn();
+    const usuario = userEvent.setup();
+    render(<DialogoLimpeza analises={[{ id3v1: true, desconhecidos: false, extras: { PRIV: 1 } }]} aoConfirmar={vi.fn()} aoCancelar={aoCancelar} />);
+    expect(screen.getByLabelText(/Remover a tag ID3v1/)).toHaveFocus();
+    await usuario.keyboard("{Escape}");
+    expect(aoCancelar).toHaveBeenCalledTimes(1);
+  });
+
+  it("Resumo: foco em Fechar; Esc fecha", async () => {
+    const aoFechar = vi.fn();
+    const usuario = userEvent.setup();
+    render(<ResumoOrganizar feitos={[]} falhas={{}} pasta={"D:\d"} ponte={criarPonteSimulada()} aoFechar={aoFechar} />);
+    expect(botao("Fechar")).toHaveFocus();
+    await usuario.keyboard("{Escape}");
+    expect(aoFechar).toHaveBeenCalledTimes(1);
+  });
+
+  it("Esc com o menu 'Inserir campo' aberto fecha só o menu; o seguinte cancela", async () => {
+    const aoCancelar = vi.fn();
+    const usuario = userEvent.setup();
+    render(<DialogoRenomear faixas={faixas} padrao="{title}" recentes={[]} ponte={criarPonteSimulada()} aoConfirmar={vi.fn()} aoCancelar={aoCancelar} />);
+    await usuario.click(botao("Inserir campo"));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await usuario.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(aoCancelar).not.toHaveBeenCalled();
+    await usuario.keyboard("{Escape}");
+    expect(aoCancelar).toHaveBeenCalledTimes(1);
+  });
+
+  it("Esc com a lista de recentes aberta fecha só a lista", async () => {
+    const aoCancelar = vi.fn();
+    const usuario = userEvent.setup();
+    render(<DialogoRenomear faixas={faixas} padrao="{title}" recentes={["{artist}"]} ponte={criarPonteSimulada()} aoConfirmar={vi.fn()} aoCancelar={aoCancelar} />);
+    await usuario.click(botao("Padrões recentes"));
+    await usuario.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(aoCancelar).not.toHaveBeenCalled();
+  });
+});
+
+describe("Organizar: OK entrega o que está na tela e a ordem das validações da v2", () => {
+  const padrao = "{albumartist}/{album}/{tracknumber:02} - {title}";
+  const abrir = (extra: Partial<Parameters<typeof DialogoOrganizar>[0]> = {}) => {
+    const aoConfirmar = vi.fn();
+    const usuario = userEvent.setup();
+    render(<DialogoOrganizar faixas={faixas} padrao={padrao} recentes={[]} pastaDestino={"D:\Música"} ponte={criarPonteSimulada()}
+      aoConfirmar={aoConfirmar} aoCancelar={vi.fn()} {...extra} />);
+    return { usuario, aoConfirmar };
+  };
+
+  it("destino alterado: o OK espera a nova prévia e entrega o destino e o padrão do plano", async () => {
+    const { usuario, aoConfirmar } = abrir();
+    await waitFor(() => expect(botao("Organizar 3 arquivos")).toBeEnabled());
+    const destino = screen.getByLabelText("Pasta de destino");
+    await usuario.clear(destino);
+    await usuario.type(destino, "E:\Novo");
+    expect(botao(/^Organizar/)).toBeDisabled();
+    await waitFor(() => expect(botao("Organizar 3 arquivos")).toBeEnabled());
+    await usuario.click(botao("Organizar 3 arquivos"));
+    const r = aoConfirmar.mock.calls[0][0];
+    expect(r.pastaDestino).toBe("E:\Novo");
+    expect(r.plano.pasta).toBe("E:\Novo");
+    expect(r.padrao).toBe(padrao);
+  });
+
+  it("padrão vazio -> 'Digite um padrão.', mesmo sem destino", async () => {
+    const { usuario } = abrir({ pastaDestino: "" });
+    const campo = screen.getByLabelText(ROTULO_PADRAO);
+    await usuario.clear(campo);
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Digite um padrão."));
+  });
+
+  it("destino vazio + campo desconhecido mostra o erro do campo", async () => {
+    abrir({ pastaDestino: "", padrao: "{foo}" });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Campo desconhecido: {foo}");
+  });
+
+  it("destino vazio + padrão sem campo pede um campo; só depois pede o destino", async () => {
+    const { usuario } = abrir({ pastaDestino: "", padrao: "fixo" });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Use pelo menos um campo, ex.: {artist}/{album}/{title}");
+    const campo = screen.getByLabelText(ROTULO_PADRAO);
+    await usuario.clear(campo);
+    await usuario.type(campo, "{{title}");
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Escolha a pasta de destino."));
+    expect(botao("Organizar")).toBeDisabled();
   });
 });

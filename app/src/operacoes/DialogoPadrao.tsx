@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { CAMPOS_TAG, type CampoTag } from "../api";
 import { Ajuda, Moldura } from "./Moldura";
 import { ESPERA_PREVIA_MS, MAX_LINHAS_PREVIA, MAX_RECENTES, ROTULOS } from "./tipos";
@@ -23,7 +23,7 @@ export const celula = (texto: string, tipo: TipoCelula = "", dica = ""): Celula 
 
 /** Lista de padrões recentes com este no topo, sem repetir (padrao.lembrar_padrao da v2). */
 export function lembrarPadrao(recentes: readonly string[], padrao: string): string[] {
-  return [padrao, ...recentes.filter((p) => p !== padrao)].slice(0, MAX_RECENTES);
+  return [...new Set([padrao, ...recentes])].slice(0, MAX_RECENTES);
 }
 
 export interface PropsPadrao<R> {
@@ -43,49 +43,51 @@ export interface PropsPadrao<R> {
   textoOk: (n: number) => string;
   /** Opções extras, entre o campo do padrão e a prévia. */
   opcoes?: ReactNode;
+  /** Recebe o padrão e o resultado DO MESMO cálculo (nunca o texto digitado depois). */
   aoConfirmar: (padrao: string, resultado: R) => void;
   aoCancelar: () => void;
+}
+
+/** Um cálculo pronto, com o padrão e as dependências com que foi feito. */
+interface Pronto<R> {
+  padrao: string;
+  deps: string;
+  calculo: Calculo<R> | null;
+  erro: string;
 }
 
 /** Base dos diálogos de padrão: campo com recentes, "Inserir campo", opções e prévia ao vivo (F-01, F-05, F-08). */
 export function DialogoPadrao<R>(p: PropsPadrao<R>) {
   const [padrao, setPadrao] = useState(p.padraoInicial);
-  const [calculo, setCalculo] = useState<Calculo<R> | null>(null);
-  const [erro, setErro] = useState("");
+  const [pronto, setPronto] = useState<Pronto<R> | null>(null);
   const [menu, setMenu] = useState(false);
+  const [lista, setLista] = useState(false);
   const campo = useRef<HTMLInputElement>(null);
   const calcularAtual = useRef(p.calcular);
   calcularAtual.current = p.calcular;
-  const idLista = useId();
   const itensLista = lembrarPadrao([...p.recentes, ...p.exemplos], p.padraoInicial);
   const texto = padrao.trim();
+  const deps = JSON.stringify(p.dependencias ?? []);
 
   useEffect(() => {
     let atual = true;
-    const espera = calculo === null && erro === "" ? 0 : ESPERA_PREVIA_MS; // a 1ª prévia sai na hora
+    const espera = pronto === null ? 0 : ESPERA_PREVIA_MS; // a 1ª prévia sai na hora
     const timer = setTimeout(async () => {
-      if (!texto) {
-        if (atual) { setErro("Digite um padrão."); setCalculo(null); }
-        return;
-      }
       let r: Calculo<R> | { erro: string };
-      try {
-        r = await calcularAtual.current(texto);
-      } catch (e) {
-        r = { erro: e instanceof Error ? e.message : String(e) };
+      if (!texto) r = { erro: "Digite um padrão." };
+      else {
+        try {
+          r = await calcularAtual.current(texto);
+        } catch (e) {
+          r = { erro: e instanceof Error ? e.message : String(e) };
+        }
       }
       if (!atual) return;
-      if ("erro" in r) {
-        setErro(r.erro);
-        setCalculo(null);
-      } else {
-        setErro("");
-        setCalculo(r);
-      }
+      setPronto("erro" in r ? { padrao: texto, deps, calculo: null, erro: r.erro } : { padrao: texto, deps, calculo: r, erro: "" });
     }, espera);
     return () => { atual = false; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [texto, ...(p.dependencias ?? [])]);
+  }, [texto, deps]);
 
   function inserir(token: string) {
     const el = campo.current;
@@ -99,83 +101,122 @@ export function DialogoPadrao<R>(p: PropsPadrao<R>) {
     });
   }
 
-  const validos = erro || !calculo ? 0 : calculo.validos;
+  function escolherRecente(item: string) {
+    setPadrao(item);
+    setLista(false);
+    campo.current?.focus();
+  }
+
+  /** Esc com o menu ou a lista aberta fecha só ele; sem nenhum, o Esc chega à moldura e cancela. */
+  function aoTeclar(e: KeyboardEvent) {
+    if (e.key === "Escape" && (menu || lista)) {
+      e.stopPropagation();
+      setMenu(false);
+      setLista(false);
+      campo.current?.focus();
+    }
+  }
+
+  const atualizado = pronto !== null && pronto.padrao === texto && pronto.deps === deps;
+  const erro = atualizado ? pronto.erro : "";
+  const calculo = pronto?.calculo ?? null;
+  const validos = calculo?.validos ?? 0;
   const mostradas = calculo ? calculo.linhas.slice(0, MAX_LINHAS_PREVIA) : [];
   const resumo = calculo
     ? calculo.resumo + (calculo.linhas.length > MAX_LINHAS_PREVIA ? ` · prévia das primeiras ${MAX_LINHAS_PREVIA}` : "")
     : "";
+  // o OK só vale para o que está na tela: texto ou opções diferentes do último cálculo o desligam
+  const podeConfirmar = atualizado && !pronto.erro && validos > 0;
 
   return (
     <Moldura titulo={p.titulo} aoFechar={p.aoCancelar} larga>
-      <Ajuda>{p.explicacao}</Ajuda>
-      <div className="op-linha-padrao">
-        <input
-          ref={campo}
-          type="text"
-          className="op-mono"
-          aria-label="Padrão"
-          list={idLista}
-          value={padrao}
-          spellCheck={false}
-          onChange={(e) => setPadrao(e.target.value)}
-        />
-        <datalist id={idLista}>
-          {itensLista.map((i) => <option key={i} value={i} />)}
-        </datalist>
-        <div className="op-menu-pai">
-          <button type="button" className="op-botao" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>
-            Inserir campo
-          </button>
-          {menu && (
-            <ul role="menu" className="op-menu" aria-label="Campos">
-              {CAMPOS_TAG.map((c) => (
-                <li key={c} role="none">
-                  <button type="button" role="menuitem" onClick={() => inserir(p.formatoCampo(c))}>
-                    {`${ROTULOS[c]}    ${p.formatoCampo(c)}`}
-                  </button>
-                </li>
-              ))}
-              {p.extrasMenu && <li role="separator" className="op-separador" />}
-              {p.extrasMenu?.map((x) => (
-                <li key={x.texto} role="none">
-                  <button type="button" role="menuitem" onClick={() => inserir(x.texto)}>{`${x.rotulo}    ${x.texto}`}</button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-      {erro && <p role="alert" className="op-erro">{erro}</p>}
-      {p.opcoes && <div className="op-opcoes">{p.opcoes}</div>}
-
-      <div className="op-previa">
-        <table aria-label="Prévia">
-          <thead>
-            <tr>{(calculo?.cabecalhos ?? []).map((c, i) => <th key={`${c}${i}`} scope="col">{c}</th>)}</tr>
-          </thead>
-          <tbody>
-            {mostradas.map((linha, i) => (
-              <tr key={i}>
-                {linha.map((c, j) => (
-                  <td key={j} className={c.tipo ? `op-${c.tipo}` : undefined} title={c.dica || undefined}>{c.texto}</td>
+      <div className="op-conteudo" onKeyDown={aoTeclar}>
+        <Ajuda>{p.explicacao}</Ajuda>
+        <div className="op-linha-padrao">
+          <input
+            ref={campo}
+            data-foco
+            type="text"
+            className="op-mono"
+            aria-label="Padrão"
+            value={padrao}
+            spellCheck={false}
+            onChange={(e) => setPadrao(e.target.value)}
+          />
+          <div className="op-menu-pai">
+            <button type="button" className="op-botao op-seta" aria-label="Padrões recentes" aria-haspopup="listbox"
+              aria-expanded={lista} onClick={() => { setLista((l) => !l); setMenu(false); }}>
+              <span aria-hidden="true">▾</span>
+            </button>
+            {lista && (
+              <ul role="listbox" className="op-menu op-lista" aria-label="Padrões recentes">
+                {itensLista.map((item) => (
+                  <li key={item} role="none">
+                    <button type="button" role="option" aria-selected={item === padrao} className="op-mono"
+                      onClick={() => escolherRecente(item)}>
+                      {item}
+                    </button>
+                  </li>
                 ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+              </ul>
+            )}
+          </div>
+          <div className="op-menu-pai">
+            <button type="button" className="op-botao" aria-haspopup="menu" aria-expanded={menu}
+              onClick={() => { setMenu((m) => !m); setLista(false); }}>
+              Inserir campo
+            </button>
+            {menu && (
+              <ul role="menu" className="op-menu" aria-label="Campos">
+                {CAMPOS_TAG.map((c) => (
+                  <li key={c} role="none">
+                    <button type="button" role="menuitem" onClick={() => inserir(p.formatoCampo(c))}>
+                      {`${ROTULOS[c]}    ${p.formatoCampo(c)}`}
+                    </button>
+                  </li>
+                ))}
+                {p.extrasMenu && <li role="separator" className="op-separador" />}
+                {p.extrasMenu?.map((x) => (
+                  <li key={x.texto} role="none">
+                    <button type="button" role="menuitem" onClick={() => inserir(x.texto)}>{`${x.rotulo}    ${x.texto}`}</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+        {erro && <p role="alert" className="op-erro">{erro}</p>}
+        {p.opcoes && <div className="op-opcoes">{p.opcoes}</div>}
 
-      <div className="op-rodape">
-        <span className="op-resumo" aria-live="polite">{resumo}</span>
-        <button type="button" className="op-botao" onClick={p.aoCancelar}>Cancelar</button>
-        <button
-          type="button"
-          className="op-botao op-primario"
-          disabled={validos === 0}
-          onClick={() => calculo && p.aoConfirmar(texto, calculo.resultado)}
-        >
-          {p.textoOk(validos)}
-        </button>
+        <div className="op-previa">
+          <table aria-label="Prévia">
+            <thead>
+              <tr>{(calculo?.cabecalhos ?? []).map((c, i) => <th key={`${c}${i}`} scope="col">{c}</th>)}</tr>
+            </thead>
+            <tbody>
+              {mostradas.map((linha, i) => (
+                <tr key={i}>
+                  {linha.map((c, j) => (
+                    <td key={j} className={c.tipo ? `op-${c.tipo}` : undefined} title={c.dica || undefined}>{c.texto}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="op-rodape">
+          <span className="op-resumo" aria-live="polite">{resumo}</span>
+          <button type="button" className="op-botao" onClick={p.aoCancelar}>Cancelar</button>
+          <button
+            type="button"
+            className="op-botao op-primario"
+            disabled={!podeConfirmar}
+            onClick={() => podeConfirmar && calculo && p.aoConfirmar(pronto.padrao, calculo.resultado)}
+          >
+            {p.textoOk(pronto && !pronto.erro ? validos : 0)}
+          </button>
+        </div>
       </div>
     </Moldura>
   );
