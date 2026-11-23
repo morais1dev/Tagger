@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { type Faixa } from "../api";
 import { CAPA_AZUL, CAPA_VERDE, type OpcoesSimuladas, faixasDeExemplo, ponteSimulada } from "../mock/ponteSimulada";
 import { bytesPng } from "../testes/imagens";
+import { criarPonteSimulada } from "../configuracoes";
 import { Janela } from "./Janela";
 
 type Usuario = ReturnType<typeof userEvent.setup>;
@@ -174,15 +175,81 @@ describe("painel: validação e gênero (C-06 e C-07)", () => {
     expect(screen.getByRole("alert")).toBeInTheDocument();
   });
 
-  it("C-07: o gênero sugere a lista padrão mais os gêneros dos arquivos, sem repetir", async () => {
+  it("C-07: digitar abre sugestões que CONTÊM o trecho, sem diferenciar maiúsculas, vindas das Configurações e dos arquivos", async () => {
     const { usuario } = await abrir();
     await selecionar(usuario, 0);
-    const lista = campo("Gênero").getAttribute("list")!;
-    const opcoes = [...document.getElementById(lista)!.querySelectorAll("option")].map((o) => o.getAttribute("value"));
-    expect(opcoes).toContain("Bossa Nova");
-    expect(opcoes).toContain("Rock");
-    expect(opcoes.filter((o) => o === "MPB")).toHaveLength(1);
-    expect(opcoes).toEqual([...opcoes].sort((a, b) => a!.localeCompare(b!, "pt-BR", { sensitivity: "base" })));
+    await usuario.clear(campo("Gênero"));
+    await usuario.type(campo("Gênero"), "OCK");
+    const lista = await screen.findByRole("listbox", { name: "Sugestões de gênero" });
+    const opcoes = within(lista).getAllByRole("option").map((o) => o.textContent);
+    expect(opcoes).toEqual(["Hard Rock", "Indie Rock", "Pop Rock", "Rock"]);      // "rock" no meio ou no fim, em ordem
+    expect(campo("Gênero")).toHaveAttribute("aria-expanded", "true");
+    await usuario.clear(campo("Gênero"));
+    await usuario.type(campo("Gênero"), "bossa");
+    expect(within(await screen.findByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual(["Bossa Nova"]);
+    await usuario.clear(campo("Gênero"));
+    expect(screen.queryByRole("listbox")).toBeNull();                              // vazio: sem popup
+    await usuario.type(campo("Gênero"), "zzz");
+    expect(screen.queryByRole("listbox")).toBeNull();                              // nada contém: sem popup
+  });
+
+  it("C-07: a lista das Configurações manda (gênero novo aparece; gêneros dos arquivos entram sem repetir)", async () => {
+    const usuario = userEvent.setup();
+    const ponteCfg = criarPonteSimulada({ generos: ["Shoegaze", "Rock"] });
+    render(<Janela ponte={ponteSimulada()} ponteConfig={ponteCfg} />);
+    await usuario.click(screen.getByRole("button", { name: "Abrir pasta" }));
+    await screen.findByRole("grid", { name: "Faixas" });
+    await selecionar(usuario, 0);
+    await usuario.clear(campo("Gênero"));
+    await usuario.type(campo("Gênero"), "o");
+    const nomes = within(await screen.findByRole("listbox")).getAllByRole("option").map((o) => o.textContent);
+    expect(nomes).toEqual(["Pop", "Rock", "Shoegaze"]);                             // Pop e Rock dos arquivos, Rock uma vez, Shoegaze da lista; sem a lista padrão
+  });
+
+  it("C-07: setas escolhem, Enter na sugestão preenche e NÃO salva; Enter sem sugestão ativa salva", async () => {
+    const { usuario, ponte } = await abrir();
+    await selecionar(usuario, 0);
+    await usuario.clear(campo("Gênero"));
+    await usuario.type(campo("Gênero"), "rock");
+    await screen.findByRole("listbox");
+    await usuario.keyboard("{ArrowDown}{ArrowDown}");
+    expect(within(screen.getByRole("listbox")).getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true");
+    await usuario.keyboard("{Enter}");
+    expect(campo("Gênero").value).toBe("Indie Rock");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(ponte.registros.salvamentos).toBe(0);                                  // o Enter foi do popup
+    await waitFor(() => expect(celula(linhas()[0], "genre")).toHaveTextContent("Indie Rock"));
+    await usuario.keyboard("{Enter}");                                             // agora sem popup: salva
+    await waitFor(() => expect(ponte.registros.salvamentos).toBe(1));
+  });
+
+  it("C-07: Enter com o popup aberto e nenhuma sugestão ativa salva (como o campo de texto comum)", async () => {
+    const { usuario, ponte } = await abrir();
+    await selecionar(usuario, 0);
+    await usuario.clear(campo("Gênero"));
+    await usuario.type(campo("Gênero"), "rock");
+    await screen.findByRole("listbox");
+    await usuario.keyboard("{Enter}");
+    await waitFor(() => expect(ponte.registros.salvamentos).toBe(1));
+  });
+
+  it("C-07: clicar numa sugestão a escolhe; Esc fecha só o popup (o foco continua no campo)", async () => {
+    const { usuario } = await abrir();
+    await selecionar(usuario, 0);
+    await usuario.clear(campo("Gênero"));
+    await usuario.type(campo("Gênero"), "jazz");
+    await usuario.click(within(await screen.findByRole("listbox")).getByRole("option", { name: "Jazz" }));
+    expect(campo("Gênero").value).toBe("Jazz");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    await usuario.clear(campo("Gênero"));
+    await usuario.type(campo("Gênero"), "pop");
+    await screen.findByRole("listbox");
+    await usuario.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(campo("Gênero")).toHaveFocus();
+    expect(screen.getByRole("grid")).not.toHaveFocus();
+    await usuario.keyboard("{Escape}");                                            // sem popup: o Esc volta à tabela
+    expect(screen.getByRole("grid")).toHaveFocus();
   });
 });
 

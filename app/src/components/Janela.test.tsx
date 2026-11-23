@@ -17,20 +17,13 @@ const titulos = () => linhas().map((l) => within(l).getAllByRole("gridcell")[1].
 const cabecalhos = () => screen.getAllByRole("columnheader").map((c) => c.textContent?.replace(/[▲▼]/g, "").trim());
 
 describe("janela principal", () => {
-  it("começa vazia, com a barra do topo e o seletor de tema", () => {
+  it("começa vazia, com a barra do topo, Configurações e o botão de modo claro/escuro", () => {
     render(<Janela ponte={ponteSimulada()} />);
     expect(screen.getByText("Abra uma pasta para começar.")).toBeInTheDocument();
     expect(screen.getByRole("toolbar", { name: "Barra principal" })).toBeInTheDocument();
-    expect(screen.getByLabelText(/Tema/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Configurações" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Alternar tema claro/escuro" })).toBeInTheDocument();
     expect(screen.getByText("Mostrando 0 de 0")).toBeInTheDocument();
-  });
-
-  it("trocar o tema muda data-tema no <html> e lembra a escolha", async () => {
-    const usuario = userEvent.setup();
-    render(<Janela ponte={ponteSimulada()} />);
-    await usuario.selectOptions(screen.getByLabelText(/Tema/), "dracula");
-    expect(document.documentElement.dataset.tema).toBe("dracula");
-    expect(localStorage.getItem("tagger.tema")).toBe("dracula");
   });
 
   it("Abrir pasta mostra as faixas com as colunas padrão na ordem da v2", async () => {

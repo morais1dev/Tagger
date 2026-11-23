@@ -1,4 +1,5 @@
 import { type KeyboardEvent, useId, useState } from "react";
+import { filtrarGeneros } from "../generos";
 import { type CampoTag, type Faixa, type Ponte, nomeDoArquivo, valorDoCampo } from "../api";
 import { duracaoFormatada } from "../colunas";
 import {
@@ -30,7 +31,8 @@ interface PropsCampo {
   campo: CampoTag;
   faixas: readonly Faixa[];
   ponte: Ponte;
-  idGeneros: string;
+  /** Sugestões do gênero (a lista das Configurações mais os gêneros dos arquivos). */
+  generos: readonly string[];
   aoAtualizar(faixas: Faixa[]): void;
   aoEnter(): void;
 }
@@ -39,7 +41,7 @@ interface PropsCampo {
  * Um campo do painel. O texto é local (o painel remonta o campo quando a seleção muda ou o rascunho muda por fora,
  * como o `carregar` da v2); cada digitação vira pendência na ponte.
  */
-function Campo({ campo, faixas, ponte, idGeneros, aoAtualizar, aoEnter }: PropsCampo) {
+function Campo({ campo, faixas, ponte, generos, aoAtualizar, aoEnter }: PropsCampo) {
   const id = useId();
   const [inicial] = useState(() => ({
     ...valorComum(faixas, campo),
@@ -47,6 +49,8 @@ function Campo({ campo, faixas, ponte, idGeneros, aoAtualizar, aoEnter }: PropsC
     foto: Object.fromEntries(faixas.map((f) => [f.id, f.pendentes[campo]])) as Record<string, string | undefined>,
   }));
   const [texto, setTexto] = useState(inicial.texto);
+  const [aberto, setAberto] = useState(false);              // popup de sugestões (só o gênero)
+  const [ativo, setAtivo] = useState(-1);
   const ids = faixas.map((f) => f.id);
   const validacao = validarValor(campo, texto);
   const erro = validacao.ok ? null : validacao.mensagem;
@@ -57,6 +61,39 @@ function Campo({ campo, faixas, ponte, idGeneros, aoAtualizar, aoEnter }: PropsC
     setTexto(novo);
     if (inicial.varios && novo === "") aoAtualizar(await ponte.restaurarCampo(campo, inicial.foto));
     else aoAtualizar(await ponte.definirCampo(ids, campo, novo));
+  }
+
+  const sugestoes = campo === "genre" && aberto ? filtrarGeneros(generos, texto) : [];
+  const popup = sugestoes.length > 0;
+
+  function escolher(genero: string) {
+    setAberto(false);
+    setAtivo(-1);
+    void editar(genero);
+  }
+
+  /** Teclas do gênero: setas movem no popup; Enter numa sugestão a escolhe (sem salvar); Esc fecha só o popup. */
+  function teclarGenero(e: KeyboardEvent<HTMLInputElement>) {
+    const total = filtrarGeneros(generos, texto).length;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      if (total === 0) return;
+      e.preventDefault();
+      setAberto(true);
+      const passo = e.key === "ArrowDown" ? 1 : -1;
+      setAtivo((a) => (popup ? (a + passo + total) % total : passo === 1 ? 0 : total - 1));
+    } else if (e.key === "Enter" && popup && ativo >= 0) {
+      e.preventDefault();
+      escolher(sugestoes[ativo]);
+    } else if (e.key === "Escape" && popup) {
+      e.preventDefault();
+      e.stopPropagation();                                   // o Esc do painel (voltar à tabela) fica para depois
+      setAberto(false);
+      setAtivo(-1);
+    } else if (e.key === "Enter") {
+      aoEnter();
+    } else if (e.key === "Tab") {
+      setAberto(false);
+    }
   }
 
   const comum = {
@@ -82,10 +119,26 @@ function Campo({ campo, faixas, ponte, idGeneros, aoAtualizar, aoEnter }: PropsC
         <input
           {...comum}
           type="text"
-          list={campo === "genre" ? idGeneros : undefined}
-          onChange={(e) => void editar(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && aoEnter()}
+          onChange={(e) => {
+            void editar(e.target.value);
+            setAberto(true);
+            setAtivo(-1);
+          }}
+          onKeyDown={campo === "genre" ? teclarGenero : (e) => e.key === "Enter" && aoEnter()}
+          onBlur={() => setAberto(false)}
+          {...(campo === "genre" ? {
+            role: "combobox", "aria-autocomplete": "list" as const, "aria-expanded": popup, "aria-controls": `${id}-lista`,
+            "aria-activedescendant": popup && ativo >= 0 ? `${id}-op-${ativo}` : undefined, autoComplete: "off",
+          } : {})}
         />
+      )}
+      {popup && (
+        <ul id={`${id}-lista`} role="listbox" aria-label="Sugestões de gênero" className="sugestoes" onMouseDown={(e) => e.preventDefault()}>
+          {sugestoes.map((g, i) => (
+            <li key={g} id={`${id}-op-${i}`} role="option" aria-selected={i === ativo} className={i === ativo ? "ativa" : undefined}
+              onClick={() => escolher(g)}>{g}</li>
+          ))}
+        </ul>
       )}
       {erro && <div id={`${id}-erro`} className="erro-campo" role="alert">{erro}</div>}
     </div>
@@ -104,7 +157,6 @@ function Rodape({ total, aoSalvar, aoDescartar }: { total: number; aoSalvar(): v
 
 /** Painel lateral de edição: campos, capa e rodapé (Descartar/Salvar). */
 export function PainelEditor(p: PropsPainel) {
-  const idGeneros = useId();
   const aoTeclar = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
@@ -127,7 +179,7 @@ export function PainelEditor(p: PropsPainel) {
   const unica = p.faixas.length === 1 ? p.faixas[0] : null;
   const salvarComEnter = () => { if (p.totalPendentes > 0) p.aoSalvar(); };
   const campo = (c: CampoTag) => (
-    <Campo key={c} campo={c} faixas={p.faixas} ponte={p.ponte} idGeneros={idGeneros} aoAtualizar={p.aoAtualizar} aoEnter={salvarComEnter} />
+    <Campo key={c} campo={c} faixas={p.faixas} ponte={p.ponte} generos={p.generos} aoAtualizar={p.aoAtualizar} aoEnter={salvarComEnter} />
   );
 
   return (
@@ -151,7 +203,6 @@ export function PainelEditor(p: PropsPainel) {
         <div className="campos-pares">{CAMPOS_PARES.map(campo)}</div>
         {CAMPOS_LARGOS_2.map(campo)}
         {(["comment", "lyrics"] as const).map(campo)}
-        <datalist id={idGeneros}>{p.generos.map((g) => <option key={g} value={g} />)}</datalist>
       </div>
       <Rodape total={p.totalPendentes} aoSalvar={p.aoSalvar} aoDescartar={p.aoDescartar} />
     </aside>

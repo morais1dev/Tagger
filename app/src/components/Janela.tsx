@@ -1,28 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type Faixa, type Ponte, nomeDoArquivo, temPendencia, valorDoCampo } from "../api";
-import { GENEROS_PADRAO, listaDeGeneros } from "../generos";
+import { listaDeGeneros } from "../generos";
 import { Divisor, LARGURA_PAINEL_PADRAO, limitarLargura } from "./Divisor";
 import { PainelEditor } from "./PainelEditor";
 import { type ChaveColuna, COLUNAS, colunasPadrao } from "../colunas";
 import { type Ordem, ordenar, proximaOrdem } from "../ordenacao";
 import { type Selecao, SELECAO_VAZIA, arrastar, clicar, manterVisiveis, navegar, selecionarTudo } from "../selecao";
-import { TEMAS, TEMA_PADRAO } from "../temas";
+import { aplicarAparencia, altura_linha } from "../aparencia";
+import { DialogoConfiguracoes, Sobre, criarPonteSimulada, type Config, type PonteConfig } from "../configuracoes";
+import { PADROES, copiarConfig } from "../configuracoes/tipos";
 import { BarraTopo } from "./BarraTopo";
 import { MenuColunas } from "./MenuColunas";
 import { TabelaFaixas } from "./TabelaFaixas";
-
-const CHAVE_TEMA = "tagger.tema";
-
-/** Tema salvo, se ainda existir; senão o padrão. O armazenamento pode estar indisponível. */
-function temaInicial(): string {
-  try {
-    const salvo = localStorage.getItem(CHAVE_TEMA);
-    if (salvo && salvo in TEMAS) return salvo;
-  } catch {
-    /* sem armazenamento: usa o padrão */
-  }
-  return TEMA_PADRAO;
-}
 
 /** Filtro de busca: título, artista, álbum ou nome do arquivo, já com os valores pendentes. */
 export function passaNoFiltro(faixa: Faixa, texto: string): boolean {
@@ -55,8 +44,20 @@ function guardarPreferencia(chave: string, valor: string) {
 /** Pergunta do sistema; nos testes é trocada por uma função que responde na hora. */
 const confirmarPadrao = (texto: string) => window.confirm(texto);
 
-export function Janela({ ponte, confirmar = confirmarPadrao }: { ponte: Ponte; confirmar?: (texto: string) => Promise<boolean> | boolean }) {
-  const [tema, setTema] = useState(temaInicial);
+interface PropsJanela {
+  ponte: Ponte;
+  /** Configurações (carregar/salvar, fontes, versão); a simulada guarda só em memória. */
+  ponteConfig?: PonteConfig;
+  confirmar?: (texto: string) => Promise<boolean> | boolean;
+}
+
+export function Janela({ ponte, ponteConfig, confirmar = confirmarPadrao }: PropsJanela) {
+  const [pontePadrao] = useState(() => criarPonteSimulada());
+  const cfg = ponteConfig ?? pontePadrao;
+  const [config, setConfig] = useState<Config>(() => copiarConfig(PADROES));    // a que vale agora (inclui a prévia ao vivo)
+  const [dialogo, setDialogo] = useState<"config" | "sobre" | null>(null);
+  const [versao, setVersao] = useState("");
+  const quemAbriu = useRef<HTMLElement | null>(null);
   const [faixas, setFaixas] = useState<Faixa[]>([]);
   const [filtro, setFiltro] = useState("");
   const [ordem, setOrdem] = useState<Ordem | null>(null);       // null = ordem de carga
@@ -72,13 +73,13 @@ export function Janela({ ponte, confirmar = confirmarPadrao }: { ponte: Ponte; c
   const [aviso, setAviso] = useState("");
 
   useEffect(() => {
-    document.documentElement.dataset.tema = tema;
-    try {
-      localStorage.setItem(CHAVE_TEMA, tema);
-    } catch {
-      /* não persiste, mas o tema continua valendo nesta sessão */
-    }
-  }, [tema]);
+    let vivo = true;
+    cfg.carregar().then((c) => vivo && setConfig(c));
+    return () => { vivo = false; };
+  }, [cfg]);
+
+  // tema, destaque, fontes, tamanho e altura das linhas: tudo vem das Configurações (e da prévia ao vivo)
+  useEffect(() => aplicarAparencia(config), [config]);
 
   const exibidas = useMemo(() => ordenar(faixas.filter((f) => passaNoFiltro(f, filtro)), ordem), [faixas, filtro, ordem]);
   const idsExibidos = useMemo(() => exibidas.map((f) => f.id), [exibidas]);
@@ -99,7 +100,7 @@ export function Janela({ ponte, confirmar = confirmarPadrao }: { ponte: Ponte; c
   const selecionadas = useMemo(() => exibidas.filter((f) => selecao.ids.has(f.id)), [exibidas, selecao.ids]);
   const totalPendentes = useMemo(() => faixas.filter(temPendencia).length, [faixas]);
   const generos = useMemo(
-    () => listaDeGeneros(GENEROS_PADRAO, faixas.map((f) => valorDoCampo(f, "genre"))), [faixas]);
+    () => listaDeGeneros(config.generos, faixas.map((f) => f.tags.genre ?? "")), [config.generos, faixas]);   // só os dos arquivos (como a v2): o que se digita não vira sugestão
 
   async function salvar() {
     if (totalPendentes === 0) return;
@@ -128,13 +129,40 @@ export function Janela({ ponte, confirmar = confirmarPadrao }: { ponte: Ponte; c
     guardarPreferencia(CHAVE_LARGURA, String(largura));
   }
 
+  function abrirDialogo(qual: "config" | "sobre") {
+    quemAbriu.current = document.activeElement as HTMLElement | null;
+    if (qual === "sobre") void cfg.sobre().then((i) => { setVersao(i.versao); setDialogo("sobre"); });
+    else setDialogo("config");
+  }
+
+  function fecharDialogo() {
+    setDialogo(null);
+    queueMicrotask(() => quemAbriu.current?.focus());           // o foco volta para quem abriu
+  }
+
+  /** Botão sol/lua: troca o modo na hora e guarda (as outras escolhas ficam como estão). */
+  function alternarModo() {
+    const nova = { ...config, usar_escuro: !config.usar_escuro };
+    setConfig(nova);
+    void cfg.salvar(nova);
+  }
+
   const chavePainel = `${selecionadas.map((f) => f.id).join("|")}#${versaoPainel}`;
 
   useEffect(() => {
     function atalhos(e: KeyboardEvent) {
+      if (dialogo !== null) return;                      // com um diálogo aberto, os atalhos são dele
+      if (e.key === "F1") {
+        e.preventDefault();
+        abrirDialogo("sobre");
+        return;
+      }
       if (!(e.ctrlKey || e.metaKey)) return;
       const tecla = e.key.toLowerCase();
-      if (tecla === "f") {
+      if (tecla === ",") {
+        e.preventDefault();
+        abrirDialogo("config");
+      } else if (tecla === "f") {
         e.preventDefault();
         refFiltro.current?.focus();
       } else if (tecla === "o") {
@@ -160,8 +188,6 @@ export function Janela({ ponte, confirmar = confirmarPadrao }: { ponte: Ponte; c
     <main className="janela">
       <BarraTopo
         ref={refFiltro}
-        tema={tema}
-        aoMudarTema={setTema}
         aoAbrirPasta={() => void abrirPasta()}
         filtro={filtro}
         aoMudarFiltro={setFiltro}
@@ -169,6 +195,9 @@ export function Janela({ ponte, confirmar = confirmarPadrao }: { ponte: Ponte; c
         total={faixas.length}
         painelVisivel={painelVisivel}
         aoAlternarPainel={alternarPainel}
+        escuro={config.usar_escuro}
+        aoAlternarModo={alternarModo}
+        aoAbrirConfiguracoes={() => abrirDialogo("config")}
       />
       <div className="corpo">
         {painelVisivel && (
@@ -202,6 +231,7 @@ export function Janela({ ponte, confirmar = confirmarPadrao }: { ponte: Ponte; c
               visiveis={visiveis}
               larguras={larguras}
               ordem={ordem}
+              alturaLinha={altura_linha(config.tamanho_fonte, config.densidade)}
               aoPressionarLinha={(id, mod) => {
                 const nova = clicar(selecao, id, idsExibidos, mod);
                 baseDoArrasto.current = nova;
@@ -228,6 +258,10 @@ export function Janela({ ponte, confirmar = confirmarPadrao }: { ponte: Ponte; c
           aoFechar={() => setMenu(null)}
         />
       )}
+      {dialogo === "config" && (
+        <DialogoConfiguracoes config={config} ponte={cfg} aoMudar={setConfig} aoFechar={fecharDialogo} />
+      )}
+      {dialogo === "sobre" && <Sobre versao={versao} aoFechar={fecharDialogo} />}
     </main>
   );
 }

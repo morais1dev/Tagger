@@ -51,6 +51,11 @@ export function DialogoConfiguracoes({ config: inicial, ponte, aoMudar, aoFechar
   const [sobre, setSobre] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
 
+  // foco inicial dentro do diálogo (e de volta a ele quando o Sobre fecha): sem isso o Esc só funcionaria depois de um clique
+  useEffect(() => {
+    if (sobre === null) document.getElementById(`cfg-aba-${aba}`)?.focus();
+  }, [sobre]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     let vivo = true;
     ponte.fontesInstaladas().then((f) => vivo && setFontes(f));
@@ -91,7 +96,11 @@ export function DialogoConfiguracoes({ config: inicial, ponte, aoMudar, aoFechar
   ][aba];
 
   return (
-    <div className="cfg-fundo" onKeyDown={(e) => { if (e.key === "Escape" && sobre === null) cancelar(); }}>
+    <div className="cfg-fundo" onKeyDown={(e) => {
+      if (sobre !== null) return;
+      if (e.key === "Escape") cancelar();
+      else if (e.key === "F1") { e.preventDefault(); void abrirSobre(); }
+    }}>
       <div role="dialog" aria-modal="true" aria-labelledby="cfg-titulo" className="cfg-janela">
         <h2 id="cfg-titulo" className="cfg-titulo">Configurações</h2>
 

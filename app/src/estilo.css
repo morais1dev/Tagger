@@ -3,8 +3,8 @@ html, body, #raiz { height: 100%; margin: 0; }
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: "Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  font-size: 13px;
+  font-family: var(--fonte-ui, "Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif);
+  font-size: var(--tamanho-fonte, 13px);
 }
 .janela { height: 100%; display: flex; flex-direction: column; min-width: 0; }
 
@@ -18,7 +18,7 @@ body {
 .filtro { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
 .filtro input { flex: 0 1 260px; min-width: 80px; }
 .seletor-tema { margin-left: auto; }
-button, select, input {
+button, select, input, textarea {
   background: var(--field); color: var(--text); border: 1px solid var(--line2);
   border-radius: 6px; padding: 4px 10px; font: inherit;
 }
@@ -32,7 +32,7 @@ button:disabled { color: var(--faint); }
 .tabela { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; outline-offset: -2px; }
 .tabela-cabecalho, .linha { display: grid; align-items: center; min-width: max-content; }
 .tabela-cabecalho {
-  position: sticky; top: 0; z-index: 1; background: var(--surface); border-bottom: 1px solid var(--line); height: 32px;
+  position: sticky; top: 0; z-index: 1; background: var(--surface); border-bottom: 1px solid var(--line); height: var(--altura-cabecalho, 34px);
 }
 .tabela-cabecalho > [role="columnheader"] { position: relative; height: 100%; display: flex; align-items: center; min-width: 0; }
 .cabecalho-botao {
@@ -43,14 +43,14 @@ button:disabled { color: var(--faint); }
 .cabecalho-botao:hover { color: var(--text); background: var(--hover) !important; }
 .alca { position: absolute; right: 0; top: 0; bottom: 0; width: 6px; cursor: col-resize; border: 0; padding: 0; background: transparent; }
 .alca:hover { background: var(--line2); }
-.linha { height: 34px; border-bottom: 1px solid transparent; cursor: default; }
+.linha { height: var(--altura-linha, 34px); border-bottom: 1px solid transparent; cursor: default; }
 .linha:hover { background: var(--hover); }
 /* arrastar para selecionar linhas não pode selecionar o texto das células (WebView2 pintaria de azul) */
 .tabela-corpo { user-select: none; -webkit-user-select: none; }
 .linha.foco { box-shadow: inset 2px 0 0 var(--acento); }
 .linha.selecionada { background: color-mix(in srgb, var(--acento) 22%, transparent); }
 .celula { padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: 100%; display: flex; align-items: center; }
-.celula.mono { font-family: "Geist Mono", "Cascadia Mono", Consolas, monospace; }
+.celula.mono { font-family: var(--fonte-mono, "Geist Mono", "Cascadia Mono", Consolas, monospace); }
 .celula.direita { justify-content: flex-end; }
 .celula.apagada { color: var(--muted); }
 .celula.sem-titulo { font-style: italic; color: var(--muted); }
@@ -94,10 +94,10 @@ button:disabled { color: var(--faint); }
 .erro-campo { color: var(--erro); font-size: 12px; }
 .campos-pares { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .marca { color: var(--acento); }
-.mono { font-family: "Geist Mono", "Cascadia Mono", Consolas, monospace; }
+.mono { font-family: var(--fonte-mono, "Geist Mono", "Cascadia Mono", Consolas, monospace); }
 .rodape-painel { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); }
-button.primario { background: var(--acento); color: var(--bg); border-color: transparent; font-weight: 600; }
-button.primario:hover:not(:disabled) { background: var(--acento); filter: brightness(1.1); }
+button.primario { background: var(--acento); color: var(--texto-sobre-acento, var(--bg)); border-color: transparent; font-weight: 600; }
+button.primario:hover:not(:disabled) { background: var(--acento-hover, var(--acento)); }
 button.primario:disabled { background: var(--field); color: var(--faint); border-color: var(--line2); }
 
 /* capa */
@@ -115,3 +115,15 @@ button.primario:disabled { background: var(--field); color: var(--faint); border
 .capa-botoes { display: flex; gap: 6px; }
 button.icone { width: 32px; padding: 4px 0; }
 .menu button:disabled { color: var(--faint); }
+
+/* altura dos controles acompanha o tamanho da fonte (tema.altura_botao da v2) */
+button, select, input[type="text"], input[type="search"] { min-height: var(--altura-botao, 32px); box-sizing: border-box; }
+
+/* sugestões do gênero (popup abaixo do campo) */
+.campo { position: relative; }
+.sugestoes {
+  position: absolute; left: 0; right: 0; top: 100%; z-index: 5; margin: 2px 0 0; padding: 4px; list-style: none;
+  max-height: 200px; overflow-y: auto; background: var(--surface2); border: 1px solid var(--line2); border-radius: 8px;
+}
+.sugestoes li { padding: 4px 8px; border-radius: 6px; cursor: default; }
+.sugestoes li:hover, .sugestoes li.ativa { background: var(--hover); outline: 1px solid var(--acento); }
