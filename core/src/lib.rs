@@ -6,4 +6,5 @@
 pub mod agrupar;
 pub mod amostras;
 pub mod metadados;
+pub mod padroes;
 pub mod validacao;
