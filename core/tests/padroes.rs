@@ -206,3 +206,24 @@ fn test_renomear_tenta_de_novo_se_o_windows_negar() {
     assert!(falhas.is_empty(), "{falhas:?}");
     assert!(!feitos.is_empty() && p.join("B.mp3").exists());
 }
+
+#[test]
+fn renomear_tenta_de_novo_com_arquivo_em_uso_no_windows() {
+    // 32 = ERROR_SHARING_VIOLATION, 33 = ERROR_LOCK_VIOLATION: o Rust não os chama de PermissionDenied
+    for codigo in [32, 33] {
+        let p = pasta();
+        let a = p.join("a.mp3");
+        std::fs::write(&a, b"x").unwrap();
+        let mut negou = false;
+        let plano = planejar_renomeacao(&[(a, t(&[(Campo::Titulo, "B")]))], "{title}").unwrap();
+        let (feitos, falhas) = executar_renomeacao_com(&plano, |origem, destino| {
+            if !negou {
+                negou = true;
+                return Err(std::io::Error::from_raw_os_error(codigo));
+            }
+            std::fs::rename(origem, destino)
+        });
+        assert!(falhas.is_empty(), "{codigo}: {falhas:?}");
+        assert!(!feitos.is_empty() && p.join("B.mp3").exists());
+    }
+}

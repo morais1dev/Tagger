@@ -10,6 +10,7 @@ publish = false
 name = "tagger_core"
 
 [dependencies]
+caseless = "0.2.2"
 lofty.workspace = true
 ogg_pager = "0.8"   # FLAC dentro de Ogg (a lofty não suporta); mesma versão que a lofty usa
 regex = "1.13.2"

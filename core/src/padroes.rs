@@ -214,6 +214,13 @@ pub fn planejar_renomeacao(itens: &[(PathBuf, Tags)], padrao: &str) -> Result<Ve
     Ok(plano)
 }
 
+/// Erro que costuma passar sozinho: permissão negada (o `PermissionError` da v2) e, no Windows,
+/// arquivo em uso (32, ERROR_SHARING_VIOLATION) ou trecho bloqueado (33, ERROR_LOCK_VIOLATION),
+/// que o Rust não classifica como `PermissionDenied`.
+fn negado_por_instantes(e: &io::Error) -> bool {
+    e.kind() == io::ErrorKind::PermissionDenied || matches!(e.raw_os_error(), Some(32 | 33))
+}
+
 /// `std::fs::rename` com poucas novas tentativas se o Windows negar por instantes (antivírus, indexador).
 fn renomear_com_tentativas(
     renomear: &mut impl FnMut(&Path, &Path) -> io::Result<()>,
@@ -223,7 +230,7 @@ fn renomear_com_tentativas(
     let tentativas = 3;
     for tentativa in 0..tentativas {
         match renomear(origem, destino) {
-            Err(e) if e.kind() == io::ErrorKind::PermissionDenied && tentativa < tentativas - 1 => {
+            Err(e) if negado_por_instantes(&e) && tentativa < tentativas - 1 => {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             outro => return outro,

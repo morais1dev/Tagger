@@ -21,14 +21,19 @@ fn texto(tags: &Tags, campo: Campo) -> &str {
     tags.get(&campo).map(|s| s.trim()).unwrap_or("")
 }
 
+/// Dobra de caixa completa do Unicode, como o `str.casefold()` da v2 ("Straße" e "STRASSE" igualam).
+fn dobrar(texto: &str) -> String {
+    caseless::default_case_fold_str(texto)
+}
+
 /// Identifica o álbum de uma faixa (sem diferenciar maiúsculas e espaços nas pontas).
 /// Sem título de álbum, todas caem no mesmo grupo, que vai para o fim.
 pub fn chave_grupo(tags: &Tags) -> (String, String) {
-    let album = texto(tags, Campo::Album).to_lowercase();
+    let album = dobrar(texto(tags, Campo::Album));
     if album.is_empty() {
         return (String::new(), String::new());
     }
-    (album, texto(tags, Campo::ArtistaAlbum).to_lowercase())
+    (album, dobrar(texto(tags, Campo::ArtistaAlbum)))
 }
 
 /// Ordem dentro da lista agrupada: álbum, artista do álbum, disco e faixa (sem álbum no fim).

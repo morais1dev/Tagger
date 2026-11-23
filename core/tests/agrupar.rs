@@ -73,3 +73,13 @@ fn test_titulo_cabecalho() {
     assert_eq!(titulo_cabecalho(&[t(&[disco]), t(&[disco, (Campo::Data, "2001")])]), "Disco, 2001");
     assert_eq!(titulo_cabecalho(&[t(&[(Campo::Artista, "X")])]), SEM_ALBUM);
 }
+
+#[test]
+fn chave_grupo_usa_a_dobra_de_caixa_completa() {
+    // como o casefold() da v2: "ß" dobra para "ss"
+    assert_eq!(
+        chave_grupo(&t(&[(Campo::Album, "Straße"), (Campo::ArtistaAlbum, "Weiß")])),
+        chave_grupo(&t(&[(Campo::Album, "STRASSE"), (Campo::ArtistaAlbum, "WEISS")]))
+    );
+    assert!(!mais_de_um_album(&[t(&[(Campo::Album, "Straße")]), t(&[(Campo::Album, "strasse")])]));
+}

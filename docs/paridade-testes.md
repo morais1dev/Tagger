@@ -171,6 +171,8 @@ Comparação v2 × tagger-core na revisão da T3.2a: em ID3v2.4 nenhuma diferen�
 - **UTF-16 multivalor sem BOM repetido:** no ID3v2.3, a lofty grava `A\0B` em UTF-16 com um BOM só; o mutagen repete o BOM antes de cada valor. Os dois leem os mesmos valores.
 - **TYER+TDAT em ID3v2.3:** um `TYER`/`TDAT`/`TIME` que já está no arquivo (v2.3 padrão, de outros programas) fica como está ao gravar outros campos e é lido como data, como o mutagen faz. Ao **gravar a data**, eles são trocados por um `TDRC`, que é o que a v2 grava. O `TDRC` existente nunca é convertido nem perde precisão ("2001-05" e os segundos ficam). Antes da revisão, a v3 convertia todo `TDRC` em `TYER`/`TDAT`/`TIME` ao regravar, e isso perdia precisão.
 - **COVERART → METADATA_BLOCK_PICTURE no Ogg:** a lofty converte o `COVERART` antigo numa imagem `METADATA_BLOCK_PICTURE` do tipo "outra" já ao ler. Qualquer gravação o regrava nesse formato, com a mesma imagem e ainda contando como capa; a v2 só o tirava ao definir uma capa nova.
+- **Mensagens de erro do sistema:** nas falhas de renomear e gravar, o texto vem do Rust (`io::Error`) e termina com `(os error N)`, onde a v2 mostrava o `strerror` do Python.
+- **Dígitos Unicode:** a validação (ano, faixa/disco, gênero numérico) e a leitura de números dos padrões aceitam só dígitos ASCII. "２０２４" (dígitos de largura total) é recusado como ano, enquanto o `\d`/`isdigit()` do Python o aceitaria.
 - **Frames "desconhecidos" do ID3:** são os que a lofty lê como binários e que não estão na lista do mutagen (`mutagen.id3.Frames`). É o mesmo critério dos `unknown_frames` da v2, salvo frames que o mutagen conhece mas não consegue ler (corrompidos), que a v2 também contaria.
 
 ## Outros arquivos de teste da v2
