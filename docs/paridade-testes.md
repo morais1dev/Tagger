@@ -75,6 +75,69 @@ Como rodar: `cargo test` na raiz (workspace) e `python -m pytest` para a v2.
 
 Total: 64 testes pytest, 63 portados, 1 não portado.
 
+## Validação: core/src/validacao.rs
+
+`validar_valor` / `validar_alteracoes` saíram de `metadados` para um módulo próprio, que é a fonte de verdade das regras e mensagens (`app/src/validacao.ts` espelha esse módulo). Os casos de `test_valores_validos` e `test_valores_invalidos` de `test_metadata.py` continuam em `metadados_mp3.rs`. `validar_valor_no_ano` recebe o ano corrente, como o `validarValor(campo, valor, anoAtual)` do app.
+
+## tests/test_rascunho.py → core/tests/rascunho.rs (core/src/rascunho.rs)
+
+| Teste pytest | Teste Rust | Observação |
+|---|---|---|
+| `test_salvamento_usa_as_opcoes_de_gravacao` | `rascunho.rs::test_salvamento_usa_as_opcoes_de_gravacao` |  |
+| `test_definir_e_valor` | `rascunho.rs::test_definir_e_valor` | o callback `ao_mudar` da v2 vira o conjunto de caminhos devolvido pelos métodos |
+| `test_valor_igual_ao_do_arquivo_nao_fica_pendente` | `rascunho.rs::test_valor_igual_ao_do_arquivo_nao_fica_pendente` |  |
+| `test_varios_valores_restaurar` | `rascunho.rs::test_varios_valores_restaurar` |  |
+| `test_salvar_varios_e_ignorado` | `rascunho.rs::test_salvar_varios_e_ignorado` |  |
+| `test_desfazer_tags` | `rascunho.rs::test_desfazer_tags` |  |
+| `test_desfazer_capa` | `rascunho.rs::test_desfazer_capa` |  |
+| `test_arquivo_modificado_por_fora_nao_e_sobrescrito` | `rascunho.rs::test_arquivo_modificado_por_fora_nao_e_sobrescrito` | mtime ajustado com `File::set_modified`; a falha é a mensagem `ARQUIVO_MODIFICADO` |
+| `test_falha_de_gravacao_nao_gera_registro` | `rascunho.rs::test_falha_de_gravacao_nao_gera_registro` | a v2 troca `salvar` por uma função que falha (monkeypatch); aqui o arquivo fica somente leitura |
+| `test_validar` | `rascunho.rs::test_validar` |  |
+| `test_renomear_leva_o_rascunho_junto` | `rascunho.rs::test_renomear_leva_o_rascunho_junto` |  |
+| `test_renomear_troca_e_ciclo_nao_mistura_pendencias` | `rascunho.rs::test_renomear_troca_e_ciclo_nao_mistura_pendencias` | o parametrize (n=2, 3) vira um laço |
+| `test_renomear_parcial_mantem_quem_nao_tem_pendencia` | `rascunho.rs::test_renomear_parcial_mantem_quem_nao_tem_pendencia` |  |
+| `test_migrar_historico` | `rascunho.rs::test_migrar_historico` | `SEM_CAPA` vira `CapaAnterior::NaoMexeu`; itens da pilha são `ItemHistorico` |
+| `test_gravadora_no_rascunho` | `rascunho.rs::test_gravadora_no_rascunho` |  |
+
+Total: 15 testes pytest, 15 portados.
+
+## tests/test_padroes.py → core/tests/padroes.rs (core/src/padroes.rs)
+
+| Teste pytest | Teste Rust | Observação |
+|---|---|---|
+| `test_campos_do_padrao` | `padroes.rs::test_campos_do_padrao` |  |
+| `test_campo_desconhecido` | `padroes.rs::test_campo_desconhecido` | `ValueError` vira `Err(mensagem)`; a mensagem é a mesma |
+| `test_nome_pelas_tags` | `padroes.rs::test_nome_pelas_tags` |  |
+| `test_campos_vazios_nao_deixam_separadores_sobrando` | `padroes.rs::test_campos_vazios_nao_deixam_separadores_sobrando` |  |
+| `test_sanitizar` | `padroes.rs::test_sanitizar` | o parametrize vira um laço |
+| `test_nomes_reservados_e_pontos_no_fim` | `padroes.rs::test_nomes_reservados_e_pontos_no_fim` |  |
+| `test_barra_no_padrao_e_recusada` | `padroes.rs::test_barra_no_padrao_e_recusada` |  |
+| `test_planejar_sem_mudanca_e_conflitos` | `padroes.rs::test_planejar_sem_mudanca_e_conflitos` |  |
+| `test_nome_vazio_e_erro` | `padroes.rs::test_nome_vazio_e_erro` |  |
+| `test_renomear_e_trocar_nomes` | `padroes.rs::test_renomear_e_trocar_nomes` |  |
+| `test_so_maiusculas_mudam` | `padroes.rs::test_so_maiusculas_mudam` |  |
+| `test_extensao_fica_minuscula` | `padroes.rs::test_extensao_fica_minuscula` |  |
+| `test_destino_criado_depois_da_previa_nao_e_sobrescrito` | `padroes.rs::test_destino_criado_depois_da_previa_nao_e_sobrescrito` |  |
+| `test_tags_pelo_nome` | `padroes.rs::test_tags_pelo_nome` |  |
+| `test_tags_pelo_nome_nao_casa` | `padroes.rs::test_tags_pelo_nome_nao_casa` |  |
+| `test_tags_pelo_nome_ignorar_e_sublinhado` | `padroes.rs::test_tags_pelo_nome_ignorar_e_sublinhado` |  |
+| `test_tags_pelas_pastas` | `padroes.rs::test_tags_pelas_pastas` |  |
+| `test_renomear_tenta_de_novo_se_o_windows_negar` | `padroes.rs::test_renomear_tenta_de_novo_se_o_windows_negar` | a v2 troca `os.rename` (monkeypatch); aqui a função de renomear é injetada em `executar_renomeacao_com` |
+
+Total: 18 testes pytest, 18 portados.
+
+## tests/test_agrupar.py → core/tests/agrupar.rs (core/src/agrupar.rs)
+
+| Teste pytest | Teste Rust | Observação |
+|---|---|---|
+| `test_chave_grupo_ignora_caixa_e_espacos` | `agrupar.rs::test_chave_grupo_ignora_caixa_e_espacos` |  |
+| `test_mais_de_um_album` | `agrupar.rs::test_mais_de_um_album` |  |
+| `test_ordem_por_album_disco_faixa_e_sem_album_no_fim` | `agrupar.rs::test_ordem_por_album_disco_faixa_e_sem_album_no_fim` |  |
+| `test_ordem_faixa` | `agrupar.rs::test_ordem_faixa` |  |
+| `test_titulo_cabecalho` | `agrupar.rs::test_titulo_cabecalho` |  |
+
+Total: 5 testes pytest, 5 portados.
+
 ## Só na v3: core/tests/regressoes.rs
 
 Casos que a v2 não precisava testar (o mutagen não tem esses problemas), mas a lofty sim. Veja `docs/adr/0001-stack-v3.md`, "Resolvido".
@@ -112,4 +175,4 @@ Comparação v2 × tagger-core na revisão da T3.2a: em ID3v2.4 nenhuma diferen�
 
 ## Outros arquivos de teste da v2
 
-Fora do escopo da T3.2a (metadados); entram nas próximas partes da T3.2: `test_agrupar.py`, `test_atribuicao.py`, `test_atualizacao.py`, `test_busca.py`, `test_busca_online.py`, `test_configuracoes_servicos.py`, `test_credenciais.py`, `test_historico.py`, `test_interface.py`, `test_interface_atualizacao.py`, `test_janela_opcoes.py`, `test_online.py`, `test_organizar.py`, `test_padroes.py`, `test_qsettings.py`, `test_rascunho.py`, `test_rede.py`, `test_seguranca.py`.
+Ainda não portados (próximas partes da T3.2): `test_atribuicao.py`, `test_atualizacao.py`, `test_busca.py`, `test_busca_online.py`, `test_configuracoes_servicos.py`, `test_credenciais.py`, `test_historico.py`, `test_interface.py`, `test_interface_atualizacao.py`, `test_janela_opcoes.py`, `test_online.py`, `test_organizar.py`, `test_qsettings.py`, `test_rede.py`, `test_seguranca.py`.

@@ -79,11 +79,10 @@ pub fn analisar(padrao: &str) -> Result<Vec<Parte>, String> {
 pub fn campos_do_padrao(padrao: &str) -> Result<Vec<Campo>, String> {
     let mut vistos = Vec::new();
     for parte in analisar(padrao)? {
-        if let Parte::Campo { campo: Some(c), .. } = parte {
-            if !vistos.contains(&c) {
+        if let Parte::Campo { campo: Some(c), .. } = parte
+            && !vistos.contains(&c) {
                 vistos.push(c);
             }
-        }
     }
     Ok(vistos)
 }
@@ -109,11 +108,10 @@ fn valor_formatado(campo: Campo, valor: &str, largura: Option<usize>) -> String 
     let mut valor = valor.trim().to_string();
     if numerico(campo) {
         valor = valor.split('/').next().unwrap_or("").trim().to_string();
-        if let Some(l) = largura {
-            if !valor.is_empty() && valor.chars().all(|c| c.is_ascii_digit()) && valor.len() < l {
+        if let Some(l) = largura
+            && !valor.is_empty() && valor.chars().all(|c| c.is_ascii_digit()) && valor.len() < l {
                 valor = format!("{}{valor}", "0".repeat(l - valor.len()));
             }
-        }
     }
     sanitizar(&valor)
 }
@@ -148,7 +146,7 @@ pub fn nome_pelas_tags(padrao: &str, valores: &Tags) -> Result<String, String> {
     let mut texto = aparar(&texto);
     if texto.chars().count() > TAMANHO_MAX_NOME {
         let cortado: String = texto.chars().take(TAMANHO_MAX_NOME).collect();
-        texto = cortado.trim_end_matches(|c| matches!(c, ' ' | '-' | '_' | '.')).to_string();
+        texto = cortado.trim_end_matches([' ', '-', '_', '.']).to_string();
     }
     if reservado(&texto) {
         texto.push('_');

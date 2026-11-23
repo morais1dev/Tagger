@@ -146,14 +146,13 @@ impl Rascunho {
     /// Grava no rascunho. Valor igual ao do arquivo = sem rascunho. Devolve true se mudou algo.
     fn definir_um(&mut self, faixa: &Faixa, campo: Campo, valor: &str) -> bool {
         if valor.trim() == valor_do_arquivo(faixa, campo) {
-            if let Some(atual) = self.tags.get_mut(&faixa.caminho) {
-                if atual.remove(&campo).is_some() {
+            if let Some(atual) = self.tags.get_mut(&faixa.caminho)
+                && atual.remove(&campo).is_some() {
                     if atual.is_empty() {
                         self.tags.remove(&faixa.caminho);
                     }
                     return true;
                 }
-            }
             return false;
         }
         let atual = self.tags.entry(faixa.caminho.clone()).or_default();
