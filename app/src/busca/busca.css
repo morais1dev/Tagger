@@ -1,0 +1,47 @@
+/* Janela de busca online: só usa os tokens de cor de temas.css. */
+.bo-fundo {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.45); z-index: 10;
+}
+.bo-janela {
+  display: flex; flex-direction: column; gap: 8px; box-sizing: border-box;
+  width: min(760px, 100vw - 32px); height: min(640px, 100vh - 32px); padding: 20px 20px 16px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--line2); border-radius: 12px;
+}
+.bo-titulo { margin: 0; font-size: 1.2em; }
+.bo-fonte { display: flex; align-items: center; gap: 16px; }
+.bo-desligado { color: var(--faint); }
+.bo-opcao { display: flex; align-items: center; gap: 6px; }
+.bo-form { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 8px; align-items: end; }
+.bo-form label { display: flex; flex-direction: column; gap: 2px; color: var(--muted); }
+.bo-lista {
+  margin: 0; padding: 4px; list-style: none; min-height: 56px; max-height: 150px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+}
+.bo-lista li { padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+.bo-lista li:hover { background: var(--hover); }
+.bo-lista li[aria-selected="true"] { background: color-mix(in srgb, var(--acento) 22%, transparent); }
+.bo-ajuda { margin: 0; color: var(--muted); font-size: 0.92em; }
+.bo-previa { flex: 1; min-height: 56px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
+.bo-previa table { width: 100%; border-collapse: collapse; }
+.bo-previa th { position: sticky; top: 0; text-align: left; color: var(--muted); background: var(--surface2); padding: 4px 8px; }
+.bo-previa td { padding: 3px 8px; }
+.bo-atribuicao { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: 0.92em; }
+.bo-atribuicao > span { flex: 1; }
+.bo-atribuicao a, .bo-link { color: var(--acento); }
+.bo-link { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; text-decoration: underline; }
+.bo-aviso { color: var(--faint); }
+.bo-estado { margin: 0; color: var(--muted); font-size: 0.92em; min-height: 1.3em; }
+.bo-rodape { display: flex; align-items: center; gap: 8px; }
+.bo-espaco { flex: 1; }
+.bo-janela input[type="text"] {
+  background: var(--field); color: var(--text); border: 1px solid var(--line2); border-radius: 6px; padding: 4px 8px; font: inherit;
+}
+.bo-janela :focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
+.bo-botao {
+  background: var(--surface2); color: var(--text); border: 1px solid var(--line2); border-radius: 6px;
+  padding: 5px 12px; font: inherit; cursor: pointer;
+}
+.bo-botao:hover:not(:disabled) { background: var(--hover); }
+.bo-botao:disabled { opacity: 0.5; cursor: default; }
+.bo-primario { background: var(--acento); border-color: var(--acento); color: var(--bg); }
