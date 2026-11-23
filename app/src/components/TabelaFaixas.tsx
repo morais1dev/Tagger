@@ -18,6 +18,8 @@ export interface PropsTabela {
   /** Largura escolhida pelo usuário, por coluna (sem entrada = a inicial). */
   larguras: Readonly<Partial<Record<ChaveColuna, number>>>;
   ordem: Ordem | null;
+  /** Altura de uma linha em px (a densidade e o tamanho da fonte das Configurações). */
+  alturaLinha: number;
   /** Botão do mouse apertado sobre a linha (clique, Ctrl, Shift e começo de um arrasto). */
   aoPressionarLinha(id: string, mod: { ctrl: boolean; shift: boolean }): void;
   /** Mouse com o botão apertado passou por esta linha (arrastar para selecionar). */
@@ -30,7 +32,6 @@ export interface PropsTabela {
 }
 
 const PASSO_TECLADO = 10;
-const ALTURA_LINHA = 34;
 const PAGINA_PADRAO = 10;          // linhas por PgUp/PgDn quando a altura da tabela é desconhecida
 
 function Indicador({ faixa, chave }: { faixa: Faixa; chave: "capa" | "estado" }) {
@@ -99,7 +100,7 @@ export function TabelaFaixas(p: PropsTabela) {
     } else if (TECLAS_NAVEGACAO.includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       const altura = grade.current?.clientHeight ?? 0;
-      p.aoNavegar(e.key as TeclaNavegacao, e.shiftKey, altura > 0 ? Math.floor(altura / ALTURA_LINHA) - 1 : PAGINA_PADRAO);
+      p.aoNavegar(e.key as TeclaNavegacao, e.shiftKey, altura > 0 ? Math.floor(altura / p.alturaLinha) - 1 : PAGINA_PADRAO);
     }
   }
 

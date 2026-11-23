@@ -1,9 +1,6 @@
 import { forwardRef } from "react";
-import { TEMAS } from "../temas";
 
 interface Props {
-  tema: string;
-  aoMudarTema(id: string): void;
   aoAbrirPasta(): void;
   filtro: string;
   aoMudarFiltro(texto: string): void;
@@ -11,12 +8,14 @@ interface Props {
   total: number;
   painelVisivel: boolean;
   aoAlternarPainel(): void;
+  /** Modo atual: o botão mostra o sol no escuro (vai para o claro) e a lua no claro, como a v2. */
+  escuro: boolean;
+  aoAlternarModo(): void;
+  aoAbrirConfiguracoes(): void;
 }
 
-/** Barra do topo: abrir pasta, filtro com contador e seletor de tema. */
+/** Barra do topo: abrir pasta, editor, filtro com contador, Configurações e modo claro/escuro. */
 export const BarraTopo = forwardRef<HTMLInputElement, Props>(function BarraTopo(p, refFiltro) {
-  const escuros = Object.entries(TEMAS).filter(([, t]) => t.escuro);
-  const claros = Object.entries(TEMAS).filter(([, t]) => !t.escuro);
   return (
     <header className="barra" role="toolbar" aria-label="Barra principal">
       <strong className="nome-app">Tagger</strong>
@@ -39,17 +38,14 @@ export const BarraTopo = forwardRef<HTMLInputElement, Props>(function BarraTopo(
         />
         <span className="contador" aria-live="polite">Mostrando {p.mostrando} de {p.total}</span>
       </div>
-      <label className="seletor-tema">
-        Tema{" "}
-        <select value={p.tema} onChange={(e) => p.aoMudarTema(e.target.value)}>
-          <optgroup label="Escuros">
-            {escuros.map(([id, t]) => <option key={id} value={id}>{t.nome}</option>)}
-          </optgroup>
-          <optgroup label="Claros">
-            {claros.map(([id, t]) => <option key={id} value={id}>{t.nome}</option>)}
-          </optgroup>
-        </select>
-      </label>
+      <button type="button" className="icone" aria-label="Configurações" title="Configurações (Ctrl+,)" onClick={p.aoAbrirConfiguracoes}>⚙</button>
+      <button
+        type="button"
+        className="icone"
+        aria-label="Alternar tema claro/escuro"
+        title="Alternar tema claro/escuro"
+        onClick={p.aoAlternarModo}
+      >{p.escuro ? "☀" : "☾"}</button>
     </header>
   );
 });

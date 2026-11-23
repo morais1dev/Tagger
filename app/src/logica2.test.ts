@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type Capa, type Faixa } from "./api";
 import { TEXTO_VARIOS, campoPendente, capaDaSelecao, capaEfetiva, temAlgumaCapa, textoCapaPendente, valorComum } from "./edicao";
-import { GENEROS_PADRAO, listaDeGeneros } from "./generos";
+import { GENEROS_PADRAO, filtrarGeneros, listaDeGeneros } from "./generos";
 import { capaDeBytes, descreverCapa, extensaoAceita, lerCabecalhoImagem, nomeSugeridoDaCapa } from "./imagem";
 import { CAPA_AZUL, CAPA_VERDE } from "./mock/ponteSimulada";
 import { bytesJpeg, bytesPng } from "./testes/imagens";
@@ -132,9 +132,18 @@ describe("valor comum e capa da seleção", () => {
 });
 
 describe("gêneros sugeridos", () => {
-  it("junta a lista padrão e os dos arquivos, sem repetir (sem diferenciar maiúsculas) e em ordem", () => {
-    const lista = listaDeGeneros(["Rock", "MPB"], ["rock", "Shoegaze", "", "  ", "axé"]);
-    expect(lista).toEqual(["axé", "MPB", "Rock", "Shoegaze"]);
+  it("junta a lista das Configurações e a dos arquivos como a v2 (só repetição idêntica sai; ordem sem diferenciar maiúsculas)", () => {
+    const lista = listaDeGeneros(["Rock", "MPB", "Rock"], ["rock", "Shoegaze", "", "  ", "axé", "MPB"]);
+    expect(lista).toEqual(["axé", "MPB", "Rock", "rock", "Shoegaze"]);
     expect(GENEROS_PADRAO).toHaveLength(40);
+  });
+
+  it("filtra por trecho, sem diferenciar maiúsculas; vazio não sugere nada", () => {
+    const lista = ["Hard Rock", "Rock", "Rockabilly", "Jazz", "Pop Rock"];
+    expect(filtrarGeneros(lista, "ROCK")).toEqual(["Hard Rock", "Rock", "Rockabilly", "Pop Rock"]);
+    expect(filtrarGeneros(lista, "  jaz ")).toEqual(["Jazz"]);
+    expect(filtrarGeneros(lista, "")).toEqual([]);
+    expect(filtrarGeneros(lista, "x")).toEqual([]);
+    expect(filtrarGeneros(lista, "o", 2)).toHaveLength(2);
   });
 });
