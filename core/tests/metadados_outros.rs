@@ -462,7 +462,7 @@ fn test_outro_arquivo_invalido() {
     std::fs::write(&lixo, b"isto nao e audio".repeat(10)).unwrap();
     assert!(carregar(&lixo).is_none() && ler_capa(&lixo).is_none());
     assert_eq!(analisar_extras(&lixo), AnaliseExtras::default());
-    assert_eq!(salvar_varios(&[&lixo], &[(Campo::Titulo, "A")], PADRAO).into_keys().collect::<Vec<_>>(), [lixo.clone()]);
+    assert_eq!(salvar_varios(&[&lixo], &[(Campo::Titulo, "A")], PADRAO).into_keys().collect::<Vec<_>>(), std::slice::from_ref(&lixo));
 }
 
 // ----------------------------------------------------------------- gravadora

@@ -85,7 +85,10 @@ Casos que a v2 não precisava testar (o mutagen não tem esses problemas), mas a
 | `genero_com_codigo_numerico_cai_no_caminho_original_da_lofty` | documenta a limitação aceita do patch: `Rock; 80` vira `(Rock)(80)` |
 | `tdrc_com_data_completa_em_id3v23_sobrevive` | contorno do `TDRC` (leitura sem conversões implícitas) |
 | `tyer_tdat_de_um_id3v23_padrao_ficam` | v2.3 padrão (`TYER`/`TDAT`/`TORY`) intacto e lido como data |
-| `data_gravada_em_id3v23_e_relida` | a data gravada em v2.3 (vira `TYER`+`TDAT`) e em v2.4 volta igual |
+| `data_gravada_em_id3v23_e_relida` | a data gravada em v2.3 e em v2.4 volta igual |
+| `tdrc_parcial_ou_com_hora_em_id3v23_nao_perde_precisao` | `TDRC` "2001-05", "2001-05-06T10:20:30" e "2001" ficam como estão em v2.3 (patch do Tagger na lofty) |
+| `data_gravada_em_id3v23_fica_em_tdrc_como_na_v2` | a data gravada em v2.3 fica em `TDRC`, como a v2 grava |
+| `frames_que_o_mutagen_conhece_nao_sao_desconhecidos` | MCDI, POSS, LINK, USER, GRID, COMR são "extras", não "desconhecidos"; limpar desconhecidos só apaga o que o mutagen não conhece |
 | `id3v23_com_cabecalho_estendido_e_lido_e_regravado` | lofty-rs #761 (backport do #777) e o áudio intacto ao regravar (correção própria do tamanho da tag) |
 | `id3v23_com_cabecalho_estendido_e_crc_fica_valido` | cabeçalho estendido com CRC não é regravado no layout do v2.4 |
 | `id3v1_existente_e_atualizado_a_partir_da_v2` | ID3v1 atualizado como o mutagen faz com `v1=1` |
@@ -97,13 +100,15 @@ Casos que a v2 não precisava testar (o mutagen não tem esses problemas), mas a
 
 A v2 abre FLAC dentro de Ogg pelo mutagen, mas não tem gerador nem teste desse formato. Na v3 ele tem implementação própria e estes testes, que seguem os da fixture `outro`: `oggflac_sem_tags`, `oggflac_ler_nao_grava`, `oggflac_salvar_e_reler`, `oggflac_comentario_grande_ocupa_varias_paginas`, `oggflac_capa_definir_trocar_remover` e `oggflac_analisar_e_limpar_extras`. Todos conferem a sequência e o CRC das páginas, e que o áudio fica intacto.
 
-## Diferenças conhecidas em relação à v2
+## Diferenças aceitas em relação à v2
 
-- **Tag vazia:** a lofty não grava uma tag ID3v2 nem um Vorbis comment de FLAC sem itens; o cabeçalho/bloco some. O mutagen mantém o cabeçalho vazio.
-- **UTF-16 multivalor no ID3v2.3:** a lofty não repete o BOM antes do 2º valor; o mutagen lê igual.
-- **Data no ID3v2.3:** a v2 grava `TDRC` (fora do padrão v2.3); a v3 grava `TYER`+`TDAT`, como o padrão manda. As duas são lidas como a mesma data.
-- **COVERART no Ogg:** a lofty converte o `COVERART` antigo numa imagem `METADATA_BLOCK_PICTURE` do tipo "outra" já ao ler; qualquer gravação o regrava nesse formato (a v2 só o tirava ao definir uma capa nova).
-- **Frames "desconhecidos" do ID3:** a v2 conta os que o mutagen não entende; a v3 conta os que a lofty lê como binários, menos GEOB, SYLT e ATXT.
+Comparação v2 × tagger-core na revisão da T3.2a: em ID3v2.4 nenhuma diferença; em ID3v2.3 só a forma da data, que foi corrigida (veja abaixo). Ficam estas diferenças, aceitas:
+
+- **Tag vazia não é gravada:** a lofty não grava uma tag ID3v2 nem um Vorbis comment de FLAC sem nenhum item; o cabeçalho (ou o bloco) some do arquivo. O mutagen mantém o cabeçalho vazio. Nenhum dado se perde.
+- **UTF-16 multivalor sem BOM repetido:** no ID3v2.3, a lofty grava `A B` em UTF-16 com um BOM só; o mutagen repete o BOM antes de cada valor. Os dois leem os mesmos valores.
+- **TYER+TDAT em ID3v2.3:** um `TYER`/`TDAT`/`TIME` que já está no arquivo (v2.3 padrão, de outros programas) fica como está ao gravar outros campos e é lido como data, como o mutagen faz. Ao **gravar a data**, eles são trocados por um `TDRC`, que é o que a v2 grava. O `TDRC` existente nunca é convertido nem perde precisão ("2001-05" e os segundos ficam). Antes da revisão, a v3 convertia todo `TDRC` em `TYER`/`TDAT`/`TIME` ao regravar, e isso perdia precisão.
+- **COVERART → METADATA_BLOCK_PICTURE no Ogg:** a lofty converte o `COVERART` antigo numa imagem `METADATA_BLOCK_PICTURE` do tipo "outra" já ao ler. Qualquer gravação o regrava nesse formato, com a mesma imagem e ainda contando como capa; a v2 só o tirava ao definir uma capa nova.
+- **Frames "desconhecidos" do ID3:** são os que a lofty lê como binários e que não estão na lista do mutagen (`mutagen.id3.Frames`). É o mesmo critério dos `unknown_frames` da v2, salvo frames que o mutagen conhece mas não consegue ler (corrompidos), que a v2 também contaria.
 
 ## Outros arquivos de teste da v2
 

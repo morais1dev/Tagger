@@ -126,7 +126,8 @@ fn test_valor_vazio_remove_e_varios_ignora() {
 
 #[test]
 fn test_so_remocoes_nao_cria_cabecalho_vazio() {
-    let casos: [(&[(Campo, &str)], Option<AcaoCapa>); 3] = [
+    type Caso<'a> = (&'a [(Campo, &'a str)], Option<AcaoCapa>);
+    let casos: [Caso; 3] = [
         (&[(Campo::Titulo, ""), (Campo::Artista, VARIOS)], None),
         (&[], Some(AcaoCapa::Remover)),
         (&[(Campo::Comentario, ""), (Campo::Letra, "")], Some(AcaoCapa::Remover)),
